@@ -1,0 +1,30 @@
+# Secrets — NE JAMAIS COMMITTER
+.env
+.env.local
+.env.production
+
+# Dépendances
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Fichiers uploadés par les candidats
+uploads/
+
+# Runtime
+pids/
+*.pid
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+.vs/
+*.swp
+*.suo
