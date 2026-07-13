@@ -1617,6 +1617,16 @@ const updateStage = async (stageId, data, agentContext = null) => {
   }
 
   await stage.update(updates);
+
+  // Si on vient de modifier une date, vérifier immédiatement si le statut doit suivre
+  // (ACCEPTE → EN_COURS si la date de début est atteinte, EN_COURS → EXPIRE si la date
+  // de fin est dépassée) — sans attendre le prochain passage du cron (toutes les 60 min).
+  if (updates.dateDebutEffective !== undefined || updates.dateFinEffective !== undefined) {
+    const { activerStagesAcceptes, expirerStagesEnCours } = require('../jobs/stageStatusJob');
+    await activerStagesAcceptes();
+    await expirerStagesEnCours();
+  }
+
   return stage.reload();
 };
 
