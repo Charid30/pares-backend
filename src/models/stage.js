@@ -27,7 +27,7 @@ module.exports = (sequelize) => {
       comment: 'Type d\'université fréquentée par le candidat',
     },
     niveau: {
-      type: DataTypes.ENUM('BAC', 'LICENCE', 'MASTER', 'DOCTORAT'),
+      type: DataTypes.ENUM('CAP', 'BEPC', 'BEP', 'BAC', 'LICENCE', 'MASTER', 'DOCTORAT'),
       allowNull: true,
     },
     dernierDiplome: {

@@ -17,7 +17,7 @@ const createStageSchema = Joi.object({
     }),
 
   niveau: Joi.string()
-    .valid('BAC', 'LICENCE', 'MASTER', 'DOCTORAT')
+    .valid('CAP', 'BEPC', 'BEP', 'BAC', 'LICENCE', 'MASTER', 'DOCTORAT')
     .when('typeStage', {
       is: Joi.valid('SOUTENANCE', 'PERFECTIONNEMENT'),
       then: Joi.required().messages({
