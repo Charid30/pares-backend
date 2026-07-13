@@ -577,6 +577,18 @@ router.put(
 );
 
 /**
+ * @route   PUT /api/stages/:id/exiger-document
+ * @desc    Exiger le remplacement d'un ou plusieurs documents sans rejeter la demande
+ * @access  Private (AGENT — direction propriétaire du stage)
+ */
+router.put(
+  '/:id/exiger-document',
+  authenticate,
+  authorizeAnyAction('STAGE', ['VALIDER', 'REJETER']),
+  stageController.exigerDocuments
+);
+
+/**
  * @route   PUT /api/stages/:id/resoumettre
  * @desc    Resoumettre une demande rejetée après remplacement des documents non conformes
  * @access  Private (CANDIDAT — propriétaire du stage)

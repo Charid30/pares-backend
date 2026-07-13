@@ -170,6 +170,48 @@ const sendDecisionEmail = async (candidat, module, decision, lignesInfo, urlSuiv
   }
 };
 
+/**
+ * Notifie un candidat qu'un ou plusieurs documents de sa demande de stage
+ * doivent être remplacés, sans que la demande soit rejetée pour autant.
+ */
+const sendDocumentARemplacerStage = async (candidat, stage, documentsLabels, urlSuivi) => {
+  const liste = documentsLabels.map(l => `<li>${l}</li>`).join('');
+  const html = emailService.buildBaseTemplate(`
+    <p class="greeting">Bonjour ${candidat.prenom} ${candidat.nom},</p>
+    <p class="message">
+      Votre demande de stage (${stage.domaineStage}) est toujours en cours de traitement, mais
+      ${documentsLabels.length > 1 ? 'les documents suivants doivent' : 'le document suivant doit'} être remplacé(s) :
+    </p>
+    <div class="info-box">
+      <ul style="margin:0; padding-left:20px;">${liste}</ul>
+    </div>
+    <p class="message">
+      Connectez-vous à votre espace pour remplacer ${documentsLabels.length > 1 ? 'ces documents' : 'ce document'}.
+      Votre demande sera examinée dès que ce sera fait.
+    </p>
+    <div style="text-align:center;">
+      <a href="${urlSuivi}" class="button">Remplacer mes documents</a>
+    </div>
+  `, 'Document à remplacer — demande de stage');
+
+  await emailService.sendEmail({
+    to: candidat.email,
+    subject: 'Un document doit être remplacé sur votre demande de stage',
+    html,
+  });
+
+  if (candidat.idcandidats) {
+    await inapp.push({
+      recipientType: 'CANDIDAT',
+      recipientId: candidat.idcandidats,
+      type: 'STAGE_DOCUMENT_A_REMPLACER',
+      titre: 'Document à remplacer',
+      message: `${documentsLabels.length > 1 ? `${documentsLabels.length} documents doivent` : 'Un document doit'} être remplacé(s) sur votre demande de stage.`,
+      link: urlSuivi,
+    });
+  }
+};
+
 // =====================================================
 // FONCTIONS MÉTIER PAR MODULE
 // =====================================================
@@ -322,6 +364,7 @@ module.exports = {
   initAgentNotificationPrefs,
   sendConfirmationSoumission,
   sendDecisionEmail,
+  sendDocumentARemplacerStage,
   onNouvelleDemandeStage,
   onNouvelleDemandeOffre,
   onNouvelleDemandeAide,

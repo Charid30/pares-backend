@@ -586,9 +586,10 @@ const updateStatusStage = async (id, data, file = null, agentId = null, agentCon
 };
 
 /**
- * Remplacer un document signalé comme non conforme lors d'un rejet.
- * Le candidat ne peut remplacer que les documents listés dans `documentsRejetes`,
- * et uniquement tant que le stage est au statut REJETE.
+ * Remplacer un document signalé comme non conforme — soit parce que la demande a été
+ * rejetée, soit parce qu'un agent a exigé son remplacement sans rejeter la demande
+ * (voir `exigerDocuments`). Le candidat ne peut remplacer que les documents listés
+ * dans `documentsRejetes`, quel que soit le statut courant du stage.
  * @param {number} id - ID du stage
  * @param {string} type - Clé du document (cv, cnib, casierJudiciaire, lettreMotivation, lettreRecommandation, dernierDiplome)
  * @param {object} file - Fichier uploadé (multer)
@@ -609,9 +610,6 @@ const remplacerDocumentStage = async (id, type, file, candidatId) => {
   if (stage.candidats_idcandidats !== candidatId) {
     throw new Error('Action non autorisée');
   }
-  if (stage.statusStage !== 'REJETE') {
-    throw new Error('Seules les demandes rejetées permettent de remplacer un document');
-  }
 
   const documentsRejetes = stage.documentsRejetes ? JSON.parse(stage.documentsRejetes) : [];
   if (!documentsRejetes.includes(type)) {
@@ -630,6 +628,65 @@ const remplacerDocumentStage = async (id, type, file, candidatId) => {
   update.documentsRejetes = documentsRestants.length > 0 ? JSON.stringify(documentsRestants) : null;
 
   await stage.update(update);
+  return stage;
+};
+
+const DOCUMENT_LABELS = {
+  cv: 'CV daté et signé',
+  cnib: 'CNIB légalisée',
+  casierJudiciaire: 'Casier judiciaire',
+  lettreMotivation: 'Lettre de motivation signée',
+  lettreRecommandation: 'Lettre de recommandation',
+  dernierDiplome: 'Dernier diplôme légalisé',
+};
+
+// Statuts sur lesquels il n'est pas pertinent d'exiger un document : REJETE a son
+// propre flux (rejet + resoumission), les autres sont des états terminaux.
+const STATUTS_NON_EXIGIBLES = ['REJETE', 'ANNULE', 'TERMINE', 'EXPIRE'];
+
+/**
+ * Exiger le remplacement d'un ou plusieurs documents sur une demande de stage
+ * SANS la rejeter — la demande garde son statut courant et continue de suivre son
+ * cours normal ; le candidat est simplement tenu de remplacer les documents visés.
+ * @param {number} id - ID du stage
+ * @param {string[]} types - Clés des documents à exiger
+ * @param {{ agentId?: number, isSystemRole?: boolean }|null} agentContext
+ */
+const exigerDocuments = async (id, types, agentContext) => {
+  const { DOCUMENT_KEYS } = require('../validators/stage.validator');
+
+  if (!Array.isArray(types) || types.length === 0) {
+    throw new Error('Veuillez sélectionner au moins un document');
+  }
+  const invalid = types.filter((t) => !DOCUMENT_KEYS.includes(t));
+  if (invalid.length > 0) {
+    throw new Error('Type de document invalide');
+  }
+
+  const stage = await Stage.findOne({
+    where: { idstage: id, del: 0 },
+    include: [{ model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom', 'email'] }],
+  });
+  if (!stage) throw new Error('Stage non trouvé');
+
+  await assertAgentOwnsDirection(agentContext, stage.direction_iddirection);
+
+  if (STATUTS_NON_EXIGIBLES.includes(stage.statusStage)) {
+    throw new Error(`Impossible d'exiger un document sur une demande au statut ${stage.statusStage}`);
+  }
+
+  const dejaExiges = stage.documentsRejetes ? JSON.parse(stage.documentsRejetes) : [];
+  const fusion = Array.from(new Set([...dejaExiges, ...types]));
+
+  await stage.update({ documentsRejetes: JSON.stringify(fusion), lastmodifiedDate: new Date() });
+
+  if (stage.candidat) {
+    const urlSuivi = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/dashboard/candidat/stages?open=${id}`;
+    const nouveauxLabels = types.map((t) => DOCUMENT_LABELS[t] || t);
+    notifService.sendDocumentARemplacerStage(stage.candidat, stage, nouveauxLabels, urlSuivi)
+      .catch((e) => console.error('❌ Erreur notification document à remplacer:', e.message));
+  }
+
   return stage;
 };
 
@@ -1532,7 +1589,15 @@ const updateStage = async (stageId, data, agentContext = null) => {
 
   const updates = {};
   if (data.commentaireAdmin !== undefined)    updates.commentaireAdmin    = data.commentaireAdmin || null;
-  if (data.dateDebutEffective !== undefined)  updates.dateDebutEffective  = data.dateDebutEffective || null;
+  if (data.dateDebutEffective !== undefined) {
+    updates.dateDebutEffective = data.dateDebutEffective || null;
+    // Correction de la date de début seule (erreur de manipulation) : recalculer
+    // automatiquement la date de fin pour conserver la durée du stage, sauf si
+    // l'appelant fournit explicitement une nouvelle date de fin.
+    if (data.dateFinEffective === undefined && data.dateDebutEffective && stage.dureeStage) {
+      updates.dateFinEffective = calculerDateFin(data.dateDebutEffective, stage.dureeStage);
+    }
+  }
   if (data.dateFinEffective !== undefined)    updates.dateFinEffective    = data.dateFinEffective || null;
 
   // Affectation direction/service — réservée aux rôles système (ADMIN, AGENT_RH...).
@@ -1930,6 +1995,7 @@ module.exports = {
   transfererStage,
   updateStatusStage,
   remplacerDocumentStage,
+  exigerDocuments,
   resoumettreStage,
   deleteStage,
   mergeStageDocuments,

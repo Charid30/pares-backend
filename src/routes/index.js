@@ -21,6 +21,8 @@ const auditRoutes = require('./audit.routes');
 const notificationRoutes = require('./notification.routes');
 const securityRoutes = require('./security.routes');
 const agentDashboardRoutes = require('./agentDashboard.routes');
+const apiKeyRoutes = require('./apiKey.routes');
+const externalRoutes = require('./external.routes');
 
 // Utiliser les routes
 router.use('/auth', authRoutes);
@@ -41,6 +43,8 @@ router.use('/admin/audit', auditRoutes);
 router.use('/admin/security', securityRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/agent-dashboard', agentDashboardRoutes);
+router.use('/admin/api-keys', apiKeyRoutes);
+router.use('/external', externalRoutes);
 
 // Route de test
 router.get('/health', (req, res) => {

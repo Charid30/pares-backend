@@ -774,6 +774,36 @@ const remplacerDocumentStage = async (req, res) => {
 };
 
 /**
+ * Exiger le remplacement d'un ou plusieurs documents sur une demande de stage,
+ * sans la rejeter — la demande garde son statut courant.
+ * PUT /api/stages/:id/exiger-document
+ * @access Private (AGENT — direction propriétaire du stage)
+ */
+const exigerDocuments = async (req, res) => {
+  try {
+    const types = Array.isArray(req.body.types)
+      ? req.body.types
+      : (req.body.types || '').split(',').map((t) => t.trim()).filter(Boolean);
+
+    const stage = await stageService.exigerDocuments(req.params.id, types, getAgentContext(req.user));
+
+    await auditService.log({
+      agentId:  req.user.agentId,
+      agentNom: req.user.username,
+      action:   'STAGE_DOCUMENT_EXIGE',
+      module:   'STAGE',
+      entityId: Number(req.params.id),
+      details:  { types },
+      ip:       req.ip,
+    });
+
+    return success(res, stage, 'Remplacement de document exigé avec succès');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
+/**
  * Resoumettre une demande de stage rejetée (après remplacement des documents non conformes)
  * PUT /api/stages/:id/resoumettre
  * @access Private (CANDIDAT — propriétaire du stage)
@@ -971,6 +1001,7 @@ module.exports = {
   transfererStage,
   updateStatusStage,
   remplacerDocumentStage,
+  exigerDocuments,
   resoumettreStage,
   deleteStage,
   printAllStageDocuments,

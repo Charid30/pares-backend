@@ -69,6 +69,10 @@ if (!isTestEnv) EmailQueue.sync({ force: false }).catch(e => console.error('Emai
 const BannedIp = require('./BannedIp');
 if (!isTestEnv) BannedIp.sync({ force: false }).catch(e => console.error('BannedIp sync:', e.message));
 
+// Clés API (applications externes)
+const ApiKey = require('./ApiKey')(sequelize);
+if (!isTestEnv) ApiKey.sync({ force: false }).catch(e => console.error('ApiKey sync:', e.message));
+
 // Créer la table notifications si elle n'existe pas
 if (!isTestEnv) Notification.sync({ force: false }).catch(e => console.error('Notification sync:', e.message));
 
@@ -528,6 +532,7 @@ module.exports = {
 
   // Sécurité
   BannedIp,
+  ApiKey,
 
   // Email
   EmailQueue,
