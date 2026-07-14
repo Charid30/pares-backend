@@ -313,6 +313,7 @@ const updateStageSchema = Joi.object({
   commentaireAdmin: Joi.string().max(1000).optional().allow('', null),
   dateDebutEffective: Joi.date().optional().allow(null),
   dateFinEffective: Joi.date().optional().allow(null),
+  dureeStage: Joi.number().integer().min(1).max(24).optional(),
   // Affectation direction/service — réservée aux rôles système (ADMIN...), voir stage.service.js
   direction_iddirection: Joi.number().integer().min(1).optional().allow(null),
   service_idservice: Joi.number().integer().min(1).optional().allow(null),
@@ -330,9 +331,21 @@ const transfererStageSchema = Joi.object({
 });
 
 /**
- * Schéma de validation pour approuver un stage (corps vide — juste confirmation)
+ * Schéma de validation pour approuver un stage. La date de début proposée est
+ * optionnelle mais, si fournie, doit obligatoirement être le 1er ou le 15 du mois
+ * (jours officiels de démarrage des stages).
  */
-const approuverStageSchema = Joi.object({});
+const approuverStageSchema = Joi.object({
+  dateDebutProposee: Joi.date().optional().allow(null, '').custom((value, helpers) => {
+    const jour = new Date(value).getUTCDate();
+    if (jour !== 1 && jour !== 15) {
+      return helpers.error('date.jourInvalide');
+    }
+    return value;
+  }).messages({
+    'date.jourInvalide': 'La date proposée doit être le 1er ou le 15 du mois',
+  }),
+});
 
 /**
  * Schéma de validation pour créer une demande de modification de stage

@@ -1589,14 +1589,23 @@ const updateStage = async (stageId, data, agentContext = null) => {
 
   const updates = {};
   if (data.commentaireAdmin !== undefined)    updates.commentaireAdmin    = data.commentaireAdmin || null;
+  if (data.dureeStage !== undefined)          updates.dureeStage          = data.dureeStage;
+
+  // Durée effective à utiliser pour le recalcul de la date de fin : celle qu'on vient
+  // de définir si elle est fournie dans cette requête, sinon celle déjà enregistrée.
+  const dureeAUtiliser = data.dureeStage !== undefined ? data.dureeStage : stage.dureeStage;
+
   if (data.dateDebutEffective !== undefined) {
     updates.dateDebutEffective = data.dateDebutEffective || null;
-    // Correction de la date de début seule (erreur de manipulation) : recalculer
-    // automatiquement la date de fin pour conserver la durée du stage, sauf si
-    // l'appelant fournit explicitement une nouvelle date de fin.
-    if (data.dateFinEffective === undefined && data.dateDebutEffective && stage.dureeStage) {
-      updates.dateFinEffective = calculerDateFin(data.dateDebutEffective, stage.dureeStage);
+    // Correction de la date de début (et/ou de la durée) : recalculer automatiquement
+    // la date de fin, sauf si l'appelant fournit explicitement une nouvelle date de fin.
+    if (data.dateFinEffective === undefined && data.dateDebutEffective && dureeAUtiliser) {
+      updates.dateFinEffective = calculerDateFin(data.dateDebutEffective, dureeAUtiliser);
     }
+  } else if (data.dureeStage !== undefined && data.dateFinEffective === undefined && stage.dateDebutEffective) {
+    // Seule la durée change (pas la date de début) : recalculer la date de fin
+    // à partir de la date de début déjà enregistrée.
+    updates.dateFinEffective = calculerDateFin(stage.dateDebutEffective, data.dureeStage);
   }
   if (data.dateFinEffective !== undefined)    updates.dateFinEffective    = data.dateFinEffective || null;
 
@@ -1688,7 +1697,7 @@ const deleteStage = async (stageId) => {
  * @param {number} stageId
  * @param {string} agentUsername
  */
-const approuverStage = async (stageId, agentUsername, agentContext = null) => {
+const approuverStage = async (stageId, agentUsername, agentContext = null, dateDebutProposee = null) => {
   const stage = await Stage.findOne({
     where: { idstage: stageId, del: 0 },
     include: [{ model: Direction, as: 'direction', required: false }],
@@ -1706,6 +1715,7 @@ const approuverStage = async (stageId, agentUsername, agentContext = null) => {
 
   await stage.update({
     statusStage: 'PROGRAMMATION_EN_COURS',
+    dateDebutProposee: dateDebutProposee || null,
     lastmodifiedDate: new Date(),
   });
 

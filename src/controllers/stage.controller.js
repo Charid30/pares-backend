@@ -840,14 +840,19 @@ const deleteStage = async (req, res) => {
  */
 const approuverStage = async (req, res) => {
   try {
-    const stage = await stageService.approuverStage(req.params.id, req.user.username, getAgentContext(req.user));
+    const stage = await stageService.approuverStage(
+      req.params.id,
+      req.user.username,
+      getAgentContext(req.user),
+      req.body.dateDebutProposee || null
+    );
     await auditService.log({
       agentId:  req.user.agentId,
       agentNom: req.user.username,
       action:   'STAGE_APPROUVE',
       module:   'STAGE',
       entityId: parseInt(req.params.id),
-      details:  { statusStage: 'PROGRAMMATION_EN_COURS' },
+      details:  { statusStage: 'PROGRAMMATION_EN_COURS', dateDebutProposee: req.body.dateDebutProposee || null },
       ip: req.ip,
     });
     return success(res, stage, 'Stage approuvé avec succès');

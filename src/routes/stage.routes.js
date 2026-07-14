@@ -19,6 +19,7 @@ const {
   createDocumentStageSchema,
   createDemandeModificationSchema,
   evaluerDemandeModificationSchema,
+  approuverStageSchema,
 } = require('../validators/stage.validator');
 
 // Configuration de multer pour l'upload de fichiers
@@ -444,6 +445,7 @@ router.put(
   '/:id/approuver',
   authenticate,
   authorizeAction('STAGE', 'APPROUVER'),
+  validate(approuverStageSchema),
   stageController.approuverStage
 );
 

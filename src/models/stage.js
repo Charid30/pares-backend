@@ -143,6 +143,11 @@ module.exports = (sequelize) => {
     dateDebutEffective: {
       type: DataTypes.DATEONLY,
     },
+    dateDebutProposee: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+      comment: 'Date de début proposée par l\'agent lors de l\'approbation (1er ou 15 du mois uniquement)',
+    },
     dateFinEffective: {
       type: DataTypes.DATEONLY,
     },
