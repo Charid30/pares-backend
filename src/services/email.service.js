@@ -464,8 +464,49 @@ const _initDailyCounter = async () => {
   }
 };
 
+/**
+ * Envoie un email via l'API HTTPS de Resend (port 443 — contourne les blocages
+ * réseau sur les ports SMTP 587/465, fréquents sur les réseaux d'entreprise).
+ * Utilisé en priorité si RESEND_API_KEY est défini dans l'environnement.
+ */
+const _sendViaResend = async ({ to, subject, html, text, fromName }) => {
+  const fromEmail = (process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev').trim();
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: `${fromName} <${fromEmail}>`,
+      to: [to],
+      subject: `PORTAIL SONABHY ${subject}`,
+      html,
+      text: text || html.replace(/<[^>]*>/g, ''),
+    }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.message || `Resend a répondu ${res.status}`);
+  }
+  return { success: true, messageId: data.id, preview: null };
+};
+
 // Envoie directement (sans vérification de limite — usage interne)
 const _sendNow = async ({ to, subject, html, text }) => {
+  // Priorité à Resend (HTTPS, port 443) si configuré — contourne les blocages SMTP.
+  if (process.env.RESEND_API_KEY) {
+    const settingsService = require('./settings.service');
+    let fromName = 'SONABHY Portail';
+    try {
+      const settings = await settingsService.getSettings();
+      fromName = settings.email?.smtpFromName || process.env.SMTP_FROM_NAME || fromName;
+    } catch { /* garder le nom par défaut */ }
+    return _sendViaResend({ to, subject, html, text, fromName });
+  }
+
   const { transporter, cfg } = await getTransporter();
   const mailOptions = {
     from: `"${cfg.fromName}" <${cfg.user || 'noreply@sonabhy.bf'}>`,
