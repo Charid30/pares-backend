@@ -105,6 +105,12 @@ const securityMiddleware = async (req, res, next) => {
   // 1. Vérifier si l'IP est bannie
   try {
     const banned = await BannedIp.findOne({ where: { ip_address: ip } });
+    if (banned?.permanent) {
+      return res.status(403).json({
+        success: false,
+        message: 'Accès refusé. Votre adresse IP est bannie définitivement suite à des tentatives d\'attaque.',
+      });
+    }
     if (banned?.banned_until && new Date(banned.banned_until) > new Date()) {
       const heuresRestantes = Math.ceil((new Date(banned.banned_until) - Date.now()) / 3600000);
       return res.status(403).json({

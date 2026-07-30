@@ -29,6 +29,15 @@ const unbanIp = async (req, res) => {
   }
 };
 
+const banPermanently = async (req, res) => {
+  try {
+    const record = await securityService.banPermanently(req.params.id);
+    return success(res, record, 'IP bannie définitivement');
+  } catch (err) {
+    return error(res, err.message, 404);
+  }
+};
+
 const deleteIp = async (req, res) => {
   try {
     await securityService.deleteIp(req.params.id);
@@ -38,4 +47,4 @@ const deleteIp = async (req, res) => {
   }
 };
 
-module.exports = { getBannedIps, getStats, unbanIp, deleteIp };
+module.exports = { getBannedIps, getStats, unbanIp, banPermanently, deleteIp };

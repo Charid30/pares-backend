@@ -76,6 +76,10 @@ if (!isTestEnv) ApiKey.sync({ force: false }).catch(e => console.error('ApiKey s
 // Créer la table notifications si elle n'existe pas
 if (!isTestEnv) Notification.sync({ force: false }).catch(e => console.error('Notification sync:', e.message));
 
+// Abonnements Web Push (notifications navigateur)
+const PushSubscription = require('./PushSubscription')(sequelize);
+if (!isTestEnv) PushSubscription.sync({ force: false }).catch(e => console.error('PushSubscription sync:', e.message));
+
 // Journal d'audit
 const AuditLog = require('./AuditLog');
 if (!isTestEnv) AuditLog.sync({ force: false }).catch(e => console.error('AuditLog sync:', e.message));
@@ -518,6 +522,7 @@ module.exports = {
 
   // Notifications in-app
   Notification,
+  PushSubscription,
 
   // Auth
   PasswordResetToken,

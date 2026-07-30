@@ -25,6 +25,11 @@ const BannedIp = sequelize.define('banned_ip', {
     type: DataTypes.DATE,
     allowNull: true, // null = suspect mais pas encore banni
   },
+  permanent: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false, // true = bannissement définitif, décidé manuellement par l'admin
+  },
 }, {
   timestamps: true,
   tableName: 'banned_ips',

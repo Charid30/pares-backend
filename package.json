@@ -32,6 +32,7 @@
     "express": "^5.2.1",
     "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^8.2.1",
+    "geoip-lite": "^2.0.3",
     "helmet": "^8.1.0",
     "hpp": "^0.2.3",
     "joi": "^18.0.2",
@@ -43,6 +44,7 @@
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.19.1",
     "sequelize": "^6.37.7",
+    "web-push": "^3.6.7",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0"
   },

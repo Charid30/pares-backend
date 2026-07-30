@@ -3,9 +3,11 @@
 // Appelé en parallèle de l'envoi email — jamais bloquant
 
 const { Notification } = require('../models');
+const pushService = require('./push.service');
 
 // ─────────────────────────────────────────────────────────────
 // Créer une notification (non bloquant — try/catch interne)
+// Déclenche aussi une notification push navigateur en parallèle.
 // ─────────────────────────────────────────────────────────────
 const push = async ({ recipientType, recipientId, type, titre, message, link = null }) => {
   try {
@@ -22,6 +24,9 @@ const push = async ({ recipientType, recipientId, type, titre, message, link = n
     console.error('[InApp] Erreur création notification:', err.message);
     // Ne jamais propager — une notif ratée ne doit pas planter le métier
   }
+
+  // Push navigateur — en arrière-plan, jamais bloquant pour l'appelant
+  pushService.sendPushToUser({ recipientType, recipientId, titre, message, link }).catch(() => {});
 };
 
 // Pousser la même notification vers tous les agents actifs d'un rôle/service
