@@ -197,7 +197,7 @@ const login = async (identifier, password, rememberMe = false) => {
     {
       model: Agent,
       as: 'agents',
-      attributes: ['idagents', 'nom', 'prenom', 'matricule', 'email'],
+      attributes: ['idagents', 'nom', 'prenom', 'matricule', 'email', 'actif'],
       through: { attributes: [] },
       include: [
         {
@@ -265,6 +265,11 @@ const login = async (identifier, password, rememberMe = false) => {
   // Déterminer si c'est un candidat ou un agent
   const isAgent = user.agents && user.agents.length > 0;
   const agent = isAgent ? user.agents[0] : null;
+
+  // Compte agent désactivé temporairement par un admin (distinct de la suppression)
+  if (isAgent && agent.actif === false) {
+    throw new Error('Ce compte a été désactivé. Contactez l\'administrateur.');
+  }
 
   // Calculer l'ensemble effectif des rôles : principal + additionnels
   const effective = computeEffectiveRoles(user);

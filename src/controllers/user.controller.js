@@ -155,6 +155,29 @@ const deleteAgent = async (req, res, next) => {
 };
 
 /**
+ * Activer / désactiver temporairement un compte agent
+ */
+const toggleAgentActif = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const actif = !!req.body.actif;
+    const agent = await userService.toggleAgentActif(parseInt(id), actif);
+    await auditService.log({
+      agentId:  req.user?.agentId,
+      agentNom: req.user?.username,
+      action:   actif ? 'AGENT_ACTIVE' : 'AGENT_DESACTIVE',
+      module:   'AGENT',
+      entityId: parseInt(id),
+      details:  { actif },
+      ip: req.ip,
+    });
+    return success(res, agent, actif ? 'Agent réactivé' : 'Agent désactivé');
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * Changer le mot de passe d'un agent
  */
 const changePassword = async (req, res, next) => {
@@ -259,6 +282,7 @@ module.exports = {
   createAgent,
   updateAgent,
   deleteAgent,
+  toggleAgentActif,
   changePassword,
   getStats,
   getMyNotifications,

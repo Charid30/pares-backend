@@ -20,6 +20,7 @@ router.get('/agents/:id',              authenticate, authorizeModule('AGENTS'), 
 router.post('/agents',                 authenticate, authorizeAction('AGENTS', 'CREER'),     userController.createAgent);
 router.put('/agents/:id',              authenticate, authorizeAction('AGENTS', 'MODIFIER'),  userController.updateAgent);
 router.delete('/agents/:id',           authenticate, authorizeAction('AGENTS', 'SUPPRIMER'), userController.deleteAgent);
+router.put('/agents/:id/actif',        authenticate, authorizeAction('AGENTS', 'MODIFIER'),  userController.toggleAgentActif);
 router.post('/agents/:id/change-password', authenticate, authorizeAction('AGENTS', 'MODIFIER'), userController.changePassword);
 
 module.exports = router;

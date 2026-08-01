@@ -475,6 +475,20 @@ const deleteAgent = async (id, deletedBy) => {
 };
 
 /**
+ * Activer / désactiver temporairement un compte agent (distinct de la suppression).
+ * Un agent désactivé ne peut plus se connecter, mais son compte et son historique
+ * sont conservés intacts — réactivable à tout moment.
+ */
+const toggleAgentActif = async (id, actif) => {
+  const agent = await Agent.findOne({ where: { idagents: id, del: 0 } });
+  if (!agent) {
+    throw new Error('Agent non trouvé');
+  }
+  await agent.update({ actif, lastModifiedDate: new Date() });
+  return agent;
+};
+
+/**
  * Changer le mot de passe d'un agent
  */
 const changeAgentPassword = async (agentId, newPassword) => {
@@ -710,6 +724,7 @@ module.exports = {
   createAgent,
   updateAgent,
   deleteAgent,
+  toggleAgentActif,
   changeAgentPassword,
   getUserStats,
   getRecentEvents,

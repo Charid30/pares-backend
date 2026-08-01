@@ -61,6 +61,12 @@ module.exports = (sequelize) => {
       type: DataTypes.TINYINT,
       defaultValue: 0,
     },
+    actif: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+      comment: 'Compte désactivé temporairement par un admin (distinct de la suppression) — bloque la connexion',
+    },
   }, {
     tableName: 'agents',
     timestamps: false,
