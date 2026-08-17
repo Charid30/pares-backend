@@ -18,6 +18,16 @@ const notifService = require('./notification.service');
  * Créer une aide (par candidat)
  */
 const createAideByCandidat = async (candidatId, data, files) => {
+  // Un IFU ou un récépissé est obligatoire pour déposer une demande d'aide —
+  // vérifié ici côté serveur (ne jamais faire confiance uniquement au frontend).
+  const candidatCheck = await Candidat.findOne({
+    where: { idcandidats: candidatId, del: 0 },
+    attributes: ['ifu', 'recipisse'],
+  });
+  if (!candidatCheck || (!candidatCheck.ifu && !candidatCheck.recipisse)) {
+    throw new Error('Vous devez renseigner votre IFU ou votre récépissé dans votre profil avant de déposer une demande d\'aide.');
+  }
+
   const aideData = {
     creePar: 'CANDIDAT',
     candidats_idcandidats: candidatId,

@@ -4,6 +4,7 @@
 
 const BannedIp = require('../models/BannedIp');
 const AuditLog = require('../models/AuditLog');
+const notifService = require('../services/notification.service');
 
 const BAN_THRESHOLD = 2;
 const BAN_DURATION_MS = 72 * 60 * 60 * 1000; // 72 heures
@@ -43,15 +44,19 @@ function getIp(req) {
   return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
-// Analyser récursivement un objet/chaîne pour détecter des patterns
-function detectInValue(value) {
+// Analyser récursivement un objet/chaîne pour détecter des patterns.
+// Retourne aussi la clé et la valeur (tronquée) ayant déclenché la détection,
+// pour permettre à l'administrateur d'inspecter la requête suspecte a posteriori.
+function detectInValue(value, key = null) {
   if (typeof value === 'string') {
     for (const { regex, label } of INJECTION_PATTERNS) {
-      if (regex.test(value)) return label;
+      if (regex.test(value)) {
+        return { label, field: key, value: value.slice(0, 200) };
+      }
     }
   } else if (value && typeof value === 'object') {
-    for (const v of Object.values(value)) {
-      const found = detectInValue(v);
+    for (const [k, v] of Object.entries(value)) {
+      const found = detectInValue(v, k);
       if (found) return found;
     }
   }
@@ -59,7 +64,8 @@ function detectInValue(value) {
 }
 
 // Enregistrer la tentative en base (async, non bloquant)
-async function recordAttempt(ip, pattern, req) {
+async function recordAttempt(ip, match, req) {
+  const { label: pattern, field: matchedField, value: matchedValue } = match;
   try {
     const [record, created] = await BannedIp.findOrCreate({
       where: { ip_address: ip },
@@ -86,6 +92,8 @@ async function recordAttempt(ip, pattern, req) {
       details: {
         ip,
         pattern,
+        matchedField,
+        matchedValue,
         attempts:  record.attempts,
         path:      req.originalUrl,
         method:    req.method,
@@ -93,6 +101,20 @@ async function recordAttempt(ip, pattern, req) {
       },
       ip_address: ip,
     });
+
+    // Alerter les administrateurs uniquement au moment précis où l'IP bascule en banni
+    // (pas à chaque tentative suivante, bloquée en amont par le middleware une fois bannie).
+    if (record.attempts === BAN_THRESHOLD) {
+      notifService.onIpBannie({
+        ip,
+        pattern,
+        path: req.originalUrl,
+        method: req.method,
+        attempts: record.attempts,
+        bannedUntil: record.banned_until,
+        permanent: false,
+      }).catch(() => {});
+    }
   } catch (err) {
     console.error('[Security] Erreur enregistrement tentative:', err.message);
   }
@@ -126,9 +148,9 @@ const securityMiddleware = async (req, res, next) => {
   const sources = [req.body, req.params, req.query];
   for (const source of sources) {
     if (!source) continue;
-    const pattern = detectInValue(source);
-    if (pattern) {
-      recordAttempt(ip, pattern, req); // async, ne bloque pas la réponse
+    const match = detectInValue(source);
+    if (match) {
+      recordAttempt(ip, match, req); // async, ne bloque pas la réponse
       return res.status(400).json({
         success: false,
         message: 'Requête refusée : contenu suspect détecté.',

@@ -32,6 +32,17 @@ module.exports = (sequelize) => {
       defaultValue: null,
       comment: 'Date de la dernière modification du nom d\'utilisateur (cooldown 25 jours)',
     },
+    last_login_ip: {
+      type: DataTypes.STRING(45),
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Adresse IP de la dernière connexion réussie — utilisée pour corréler une IP suspecte à un compte',
+    },
+    last_login_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      defaultValue: null,
+    },
   }, {
     tableName: 'users',
     timestamps: false,

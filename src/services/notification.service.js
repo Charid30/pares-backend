@@ -1,6 +1,6 @@
 // src/services/notification.service.js
 // Service centralisé : notifications email + in-app (agents + candidats)
-const { AgentNotificationPref, Agent, Candidat } = require('../models');
+const { AgentNotificationPref, Agent, Candidat, User, Role } = require('../models');
 const emailService = require('./email.service');
 const inapp = require('./inapp.service');
 
@@ -47,6 +47,46 @@ const notifyAgents = async (notificationType, subject, html, inappPayload = null
     }
   } catch (err) {
     console.error('❌ Erreur notifyAgents:', err.message);
+  }
+};
+
+/**
+ * Notifier tous les administrateurs (email + in-app + push) — utilisé pour les alertes
+ * de sécurité, sans opt-out possible via les préférences de notification classiques :
+ * un bannissement d'IP est une alerte critique, pas une notification métier facultative.
+ */
+const notifyAdmins = async (subject, html, inappPayload = null) => {
+  try {
+    const adminUsers = await User.findAll({
+      where: { del: 0 },
+      include: [
+        { model: Role, as: 'role', attributes: ['accronyme'] },
+        { model: Role, as: 'additionalRoles', attributes: ['accronyme'], through: { attributes: [] } },
+        { model: Agent, as: 'agents', attributes: ['idagents', 'email', 'nom', 'prenom', 'actif'], through: { attributes: [] }, where: { del: 0 }, required: true },
+      ],
+    });
+
+    const seen = new Set();
+    for (const u of adminUsers) {
+      const isAdmin = u.role?.accronyme === 'ADMIN' || (u.additionalRoles || []).some(r => r.accronyme === 'ADMIN');
+      if (!isAdmin) continue;
+
+      for (const agent of (u.agents || [])) {
+        if (agent.actif === false || seen.has(agent.idagents)) continue;
+        seen.add(agent.idagents);
+
+        try {
+          await emailService.sendEmail({ to: agent.email, subject, html });
+        } catch (e) {
+          console.error(`❌ Email admin ${agent.email} échoué:`, e.message);
+        }
+        if (inappPayload) {
+          await inapp.push({ recipientType: 'AGENT', recipientId: agent.idagents, ...inappPayload });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('❌ Erreur notifyAdmins:', err.message);
   }
 };
 
@@ -285,6 +325,36 @@ const onNouvelleDemandeAudience = async (candidat, demande) => {
   });
 };
 
+/**
+ * Alerte les administrateurs qu'une adresse IP vient d'être bannie
+ * (automatiquement suite à des tentatives d'injection, ou manuellement).
+ */
+const onIpBannie = async ({ ip, pattern, path, method, attempts, bannedUntil, permanent, manuel = false }) => {
+  const html = emailService.buildBaseTemplate(`
+    <p class="greeting">Alerte sécurité</p>
+    <p class="message">
+      L'adresse IP <strong>${ip}</strong> vient d'être ${manuel ? 'bannie manuellement' : 'bannie automatiquement'}
+      sur le portail PARES${permanent ? ' (bannissement définitif)' : ''}.
+    </p>
+    <div class="info-box">
+      ${pattern ? `<p><strong>Type d'attaque :</strong> ${pattern}</p>` : ''}
+      ${method && path ? `<p><strong>Requête :</strong> ${method} ${path}</p>` : ''}
+      ${attempts ? `<p><strong>Tentatives :</strong> ${attempts}</p>` : ''}
+      ${!permanent && bannedUntil ? `<p><strong>Banni jusqu'au :</strong> ${new Date(bannedUntil).toLocaleString('fr-FR')}</p>` : ''}
+    </div>
+    <div style="text-align:center;">
+      <a href="${FRONTEND}/dashboard/admin/securite" class="button">Voir la page Sécurité</a>
+    </div>
+  `, 'Alerte sécurité — IP bannie');
+
+  await notifyAdmins(`🔒 Alerte sécurité — IP ${ip} bannie`, html, {
+    type: 'SECURITE_IP_BANNIE',
+    titre: 'IP bannie',
+    message: `L'adresse IP ${ip} a été ${manuel ? 'bannie manuellement' : 'bannie automatiquement'}${pattern ? ` (${pattern})` : ''}.`,
+    link: `${FRONTEND}/dashboard/admin/securite`,
+  });
+};
+
 // =====================================================
 // INITIALISER LES PREFS D'UN NOUVEL AGENT
 // =====================================================
@@ -361,6 +431,7 @@ const broadcastCandidatsWithInApp = async (subject, html, inappPayload) => {
 
 module.exports = {
   notifyAgents,
+  notifyAdmins,
   initAgentNotificationPrefs,
   sendConfirmationSoumission,
   sendDecisionEmail,
@@ -369,6 +440,7 @@ module.exports = {
   onNouvelleDemandeOffre,
   onNouvelleDemandeAide,
   onNouvelleDemandeAudience,
+  onIpBannie,
   broadcastCandidats,
   broadcastCandidatsWithInApp,
 };

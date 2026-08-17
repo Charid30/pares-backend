@@ -79,7 +79,7 @@ const computeGlobalActionPermissions = async (rolesDetails) => {
  * Service d'inscription (register)
  */
 const register = async (data) => {
-  const { username, password, nom, prenom, genre, email, telephone, nip, ifu, recipisse } = data;
+  const { username, password, nom, prenom, genre, email, telephone, nip, passeport, ifu, recipisse } = data;
 
   // Le rôle CANDIDAT est toujours forcé pour l'inscription publique (idrole = 6)
   const CANDIDAT_ROLE_ID = 6;
@@ -102,10 +102,20 @@ const register = async (data) => {
     throw new Error('Un compte existe déjà avec ce numéro de téléphone.');
   }
 
-  // Vérifier si le NIP existe déjà
-  const existingNip = await Candidat.findOne({ where: { nip } });
-  if (existingNip) {
-    throw new Error('Un compte existe déjà avec ce numéro NIP.');
+  // Vérifier si le NIP existe déjà (seulement si fourni)
+  if (nip) {
+    const existingNip = await Candidat.findOne({ where: { nip } });
+    if (existingNip) {
+      throw new Error('Un compte existe déjà avec ce numéro NIP.');
+    }
+  }
+
+  // Vérifier si le passeport existe déjà (seulement si fourni)
+  if (passeport) {
+    const existingPasseport = await Candidat.findOne({ where: { passeport } });
+    if (existingPasseport) {
+      throw new Error('Un compte existe déjà avec ce numéro de passeport.');
+    }
   }
 
   // Vérifier si l'IFU existe déjà (seulement si fourni)
@@ -139,7 +149,8 @@ const register = async (data) => {
     genre: genre || null,
     email,
     telephone,
-    nip,
+    nip: nip || null,
+    passeport: passeport || null,
     ifu: ifu || null,
     recipisse: recipisse || null,
   });
@@ -176,7 +187,7 @@ const register = async (data) => {
  * Service de connexion (login)
  * Supporte à la fois les candidats et les agents (admin, agent_rh, etc.)
  */
-const login = async (identifier, password, rememberMe = false) => {
+const login = async (identifier, password, rememberMe = false, ip = null) => {
   const includeConfig = [
     {
       model: Role,
@@ -271,6 +282,13 @@ const login = async (identifier, password, rememberMe = false) => {
     throw new Error('Ce compte a été désactivé. Contactez l\'administrateur.');
   }
 
+  // Traçabilité de connexion — sert à corréler une IP suspecte à un compte enregistré
+  if (ip) {
+    user.last_login_ip = ip;
+    user.last_login_at = new Date();
+    await user.save();
+  }
+
   // Calculer l'ensemble effectif des rôles : principal + additionnels
   const effective = computeEffectiveRoles(user);
 
@@ -346,7 +364,7 @@ const getProfile = async (userId) => {
       {
         model: Candidat,
         as: 'candidat',
-        attributes: ['idcandidats', 'nom', 'prenom', 'genre', 'email', 'telephone', 'nip', 'ifu', 'recipisse'],
+        attributes: ['idcandidats', 'nom', 'prenom', 'genre', 'email', 'telephone', 'nip', 'passeport', 'ifu', 'recipisse'],
       },
       {
         model: Agent,

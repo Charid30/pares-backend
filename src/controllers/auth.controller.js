@@ -36,7 +36,7 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     const { username, password, rememberMe = false } = req.body;
-    const result = await authService.login(username, password, !!rememberMe);
+    const result = await authService.login(username, password, !!rememberMe, req.ip);
     // Durée du cookie selon "se souvenir de moi"
     res.cookie('token', result.token, {
       ...baseCookieOptions,

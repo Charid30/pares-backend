@@ -11,7 +11,7 @@ const {
   Service,
   Direction,
 } = require('../models');
-const { Op } = require('sequelize');
+const { Op, literal } = require('sequelize');
 const emailService = require('./email.service');
 const notifService = require('./notification.service');
 const { getAgentDirectionIds } = require('../utils/agentDirections.util');
@@ -275,7 +275,9 @@ const getAllStages = async (filters = {}, agentContext = null) => {
         'lettreRecommandation', 'dernierDiplome'
       ]
     },
-    order: [['createdDate', 'DESC']],
+    // Une demande resoumise après rejet doit remonter comme une nouvelle demande à traiter :
+    // on trie sur la date de resoumission si elle existe, sinon sur la date de création.
+    order: [[literal('COALESCE(`stage`.`dateResoumission`, `stage`.`createdDate`)'), 'DESC']],
     limit: parseInt(limit),
     offset: parseInt(offset),
     distinct: true
@@ -635,7 +637,7 @@ const DOCUMENT_LABELS = {
   cv: 'CV daté et signé',
   cnib: 'CNIB légalisée',
   casierJudiciaire: 'Casier judiciaire',
-  lettreMotivation: 'Lettre de motivation signée',
+  lettreMotivation: 'Demande de stage signée',
   lettreRecommandation: 'Lettre de recommandation',
   dernierDiplome: 'Dernier diplôme légalisé',
 };
@@ -718,6 +720,7 @@ const resoumettreStage = async (id, candidatId) => {
     statusStage: 'EN_ATTENTE',
     motifRefus: null,
     documentsRejetes: null,
+    dateResoumission: new Date(),
     lastmodifiedDate: new Date(),
   });
 

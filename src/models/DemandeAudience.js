@@ -71,10 +71,22 @@ module.exports = (sequelize) => {
     dateAudience: {
       type: DataTypes.DATEONLY,
       allowNull: false,
+      comment: 'Date initialement souhaitée par le candidat',
     },
     heureAudience: {
       type: DataTypes.TIME,
       allowNull: false,
+      comment: 'Heure initialement souhaitée par le candidat',
+    },
+    dateAudienceConfirmee: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+      comment: 'Date fixée par l\'agent lors de l\'acceptation (peut différer de la date souhaitée)',
+    },
+    heureAudienceConfirmee: {
+      type: DataTypes.TIME,
+      allowNull: true,
+      comment: 'Heure fixée par l\'agent lors de l\'acceptation',
     },
     status: {
       type: DataTypes.ENUM('EN_ATTENTE', 'ACCEPTE', 'REJETE', 'ANNULE'),

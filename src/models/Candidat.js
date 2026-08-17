@@ -42,9 +42,15 @@ module.exports = (sequelize) => {
     },
     nip: {
       type: DataTypes.CHAR(17),
-      allowNull: true, // NULL pour les candidats antérieurs à l'ajout du champ
+      allowNull: true, // NULL si le candidat s'est identifié par passeport
       unique: true,
       comment: 'Numéro NIP — 17 chiffres de la CNIB',
+    },
+    passeport: {
+      type: DataTypes.STRING(12),
+      allowNull: true, // NULL si le candidat s'est identifié par CNIB (nip)
+      unique: true,
+      comment: 'Numéro de passeport — alternative au NIP pour l\'identification à l\'inscription',
     },
     ifu: {
       type: DataTypes.CHAR(9),

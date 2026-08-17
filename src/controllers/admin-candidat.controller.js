@@ -137,13 +137,13 @@ const exportCandidats = async (req, res) => {
         where: { del: 0 },
         required: false,
       }],
-      attributes: ['idcandidats', 'nom', 'prenom', 'email', 'telephone', 'nip', 'ifu', 'createdDate'],
+      attributes: ['idcandidats', 'nom', 'prenom', 'email', 'telephone', 'nip', 'passeport', 'ifu', 'createdDate'],
       order: [['createdDate', 'DESC']],
     });
 
     const fmt = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '';
 
-    const headers = ['N°', 'Nom', 'Prénom', 'Email', 'Téléphone', 'NIP', 'IFU', 'Date inscription'];
+    const headers = ['N°', 'Nom', 'Prénom', 'Email', 'Téléphone', 'NIP', 'Passeport', 'IFU', 'Date inscription'];
 
     const rows = candidats.map((c, i) => [
       i + 1,
@@ -152,6 +152,7 @@ const exportCandidats = async (req, res) => {
       c.email       || '',
       c.telephone   || '',
       c.nip         || '',
+      c.passeport   || '',
       c.ifu         || '',
       fmt(c.createdDate),
     ]);

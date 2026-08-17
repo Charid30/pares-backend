@@ -116,9 +116,12 @@ const getAllDemandes = async (req, res) => {
 const updateStatut = async (req, res) => {
   try {
     const demandeId = parseInt(req.params.id);
-    const { status, commentaireAdmin } = req.body;
+    const { status, commentaireAdmin, dateAudienceConfirmee, heureAudienceConfirmee } = req.body;
     if (!status) return error(res, 'Le statut est requis', 400);
-    const demande = await demandeAudienceService.updateStatut(demandeId, status, commentaireAdmin);
+    const demande = await demandeAudienceService.updateStatut(
+      demandeId, status, commentaireAdmin,
+      dateAudienceConfirmee || null, heureAudienceConfirmee || null
+    );
 
     await auditService.log({
       agentId:  req.user?.agentId,
@@ -126,7 +129,7 @@ const updateStatut = async (req, res) => {
       action:   status === 'ACCEPTE' ? 'AUDIENCE_ACCEPTEE' : 'AUDIENCE_REJETEE',
       module:   'AUDIENCE',
       entityId: demandeId,
-      details:  { status, commentaireAdmin: commentaireAdmin || null },
+      details:  { status, commentaireAdmin: commentaireAdmin || null, dateAudienceConfirmee: dateAudienceConfirmee || null, heureAudienceConfirmee: heureAudienceConfirmee || null },
       ip: req.ip,
     });
 

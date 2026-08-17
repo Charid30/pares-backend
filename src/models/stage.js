@@ -163,6 +163,11 @@ module.exports = (sequelize) => {
       allowNull: true,
       comment: 'Liste JSON des clés de documents non conformes signalées lors d\'un rejet (ex: ["cv","dernierDiplome"]) — le candidat doit les remplacer avant de resoumettre',
     },
+    dateResoumission: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: 'Date à laquelle le candidat a resoumis la demande après un rejet — utilisée pour la faire remonter comme une nouvelle demande à examiner',
+    },
     estRenouvellement: {
       type: DataTypes.TINYINT,
       defaultValue: 0,

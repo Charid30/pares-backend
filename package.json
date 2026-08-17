@@ -9,7 +9,8 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "seed:admin": "node src/scripts/seedAdmin.js",
-    "seed:starter": "node src/scripts/seed_starter.js"
+    "seed:starter": "node src/scripts/seed_starter.js",
+    "migrate": "node scripts/run-migrations.js"
   },
   "keywords": [
     "PARES",

@@ -47,4 +47,32 @@ const deleteIp = async (req, res) => {
   }
 };
 
-module.exports = { getBannedIps, getStats, unbanIp, banPermanently, deleteIp };
+const getLogsForIp = async (req, res) => {
+  try {
+    const logs = await securityService.getLogsForIp(req.params.ip);
+    return success(res, logs, 'Historique récupéré');
+  } catch (err) {
+    return error(res, err.message, 500);
+  }
+};
+
+const findUserByIp = async (req, res) => {
+  try {
+    const user = await securityService.findUserByIp(req.params.ip);
+    return success(res, user, user ? 'Compte trouvé' : 'Aucun compte associé à cette IP');
+  } catch (err) {
+    return error(res, err.message, 500);
+  }
+};
+
+const banManually = async (req, res) => {
+  try {
+    const { ip_address, permanent, durationHours, reason } = req.body;
+    const record = await securityService.banManually(ip_address, { permanent, durationHours, reason });
+    return success(res, record, 'IP bannie manuellement avec succès');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
+module.exports = { getBannedIps, getStats, unbanIp, banPermanently, deleteIp, getLogsForIp, findUserByIp, banManually };

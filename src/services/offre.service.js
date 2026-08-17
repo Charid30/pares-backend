@@ -20,6 +20,16 @@ const settingsService = require('./settings.service');
  * Créer une offre (par candidat)
  */
 const createOffreByCandidat = async (candidatId, data, files) => {
+  // Un IFU ou un récépissé est obligatoire pour déposer une offre commerciale —
+  // vérifié ici côté serveur (ne jamais faire confiance uniquement au frontend).
+  const candidatCheck = await Candidat.findOne({
+    where: { idcandidats: candidatId, del: 0 },
+    attributes: ['ifu', 'recipisse'],
+  });
+  if (!candidatCheck || (!candidatCheck.ifu && !candidatCheck.recipisse)) {
+    throw new Error('Vous devez renseigner votre IFU ou votre récépissé dans votre profil avant de déposer une offre.');
+  }
+
   const offreData = {
     creePar: 'CANDIDAT',
     candidats_idcandidats: candidatId,

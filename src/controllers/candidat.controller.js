@@ -23,6 +23,7 @@ const getProfil = async (req, res) => {
       email: profil.email,
       telephone: profil.telephone,
       nip: profil.nip,
+      passeport: profil.passeport || null,
       ifu: profil.ifu || null,
       recipisse: profil.recipisse || null,
       createdDate: profil.createdDate,

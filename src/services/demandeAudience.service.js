@@ -195,7 +195,7 @@ const getAllDemandes = async (options = {}, directionId = null) => {
 // ─────────────────────────────────────────────────────────────
 // CHANGER LE STATUT (admin / agents)
 // ─────────────────────────────────────────────────────────────
-const updateStatut = async (demandeId, status, commentaireAdmin = null) => {
+const updateStatut = async (demandeId, status, commentaireAdmin = null, dateAudienceConfirmee = null, heureAudienceConfirmee = null) => {
   const STATUTS_VALIDES = ['EN_ATTENTE', 'ACCEPTE', 'REJETE'];
   if (!STATUTS_VALIDES.includes(status)) {
     throw new Error('Statut invalide. Valeurs acceptées : EN_ATTENTE, ACCEPTE, REJETE');
@@ -213,6 +213,14 @@ const updateStatut = async (demandeId, status, commentaireAdmin = null) => {
   demande.status = status;
   demande.commentaireAdmin = commentaireAdmin;
   demande.lastModifiedDate = new Date();
+
+  // Date/heure fixées par l'agent à l'acceptation — optionnelles, sinon on garde
+  // la date/heure initialement souhaitée par le candidat.
+  if (status === 'ACCEPTE') {
+    if (dateAudienceConfirmee) demande.dateAudienceConfirmee = dateAudienceConfirmee;
+    if (heureAudienceConfirmee) demande.heureAudienceConfirmee = heureAudienceConfirmee;
+  }
+
   await demande.save();
 
   // Notification au candidat — en arrière-plan
@@ -221,11 +229,13 @@ const updateStatut = async (demandeId, status, commentaireAdmin = null) => {
       const candidat = await Candidat.findOne({ where: { idcandidats: demande.candidats_idcandidats, del: 0 } });
       if (candidat && (status === 'ACCEPTE' || status === 'REJETE')) {
         const frontUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+        const dateFinale = demande.dateAudienceConfirmee || demande.dateAudience;
+        const heureFinale = demande.heureAudienceConfirmee || demande.heureAudience;
         await notifService.sendDecisionEmail(
           candidat, 'audience', status,
           [
-            { label: 'Date audience', value: new Date(demande.dateAudience).toLocaleDateString('fr-FR') },
-            { label: 'Heure', value: demande.heureAudience },
+            { label: 'Date audience', value: new Date(dateFinale).toLocaleDateString('fr-FR') },
+            { label: 'Heure', value: heureFinale },
           ],
           `${frontUrl}/dashboard/candidat/mes-audiences`,
           commentaireAdmin || null

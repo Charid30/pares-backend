@@ -72,10 +72,14 @@ const registerSchema = Joi.object({
 
   nip: Joi.string()
     .pattern(/^[0-9]{17}$/)
-    .required()
     .messages({
-      'string.empty': 'Le numéro NIP est requis',
       'string.pattern.base': 'Le numéro NIP doit contenir exactement 17 chiffres',
+    }),
+
+  passeport: Joi.string()
+    .pattern(/^[A-Za-z0-9]{6,12}$/)
+    .messages({
+      'string.pattern.base': 'Le numéro de passeport doit contenir entre 6 et 12 caractères alphanumériques',
     }),
 
   ifu: Joi.string()
@@ -85,7 +89,12 @@ const registerSchema = Joi.object({
     .messages({
       'string.pattern.base': 'Le numéro IFU doit contenir 8 chiffres suivis d\'une lettre (ex: 12345678A)',
     }),
-});
+})
+  .xor('nip', 'passeport')
+  .messages({
+    'object.missing': 'Vous devez renseigner soit votre numéro NIP (CNIB), soit votre numéro de passeport',
+    'object.xor': 'Vous ne pouvez renseigner que le NIP ou le passeport, pas les deux',
+  });
 
 /**
  * Schéma de validation pour la connexion (login)
