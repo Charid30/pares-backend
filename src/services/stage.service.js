@@ -174,17 +174,24 @@ const createStage = async (candidatId, data, files) => {
  *   Si absent ou isSystemRole=true, tous les stages sont retournés.
  */
 const getAllStages = async (filters = {}, agentContext = null) => {
-  const { page = 1, limit = 10, statusStage, typeStage, domaineStage, search } = filters;
+  const { page = 1, limit = 10, statusStage, typeStage, domaineStage, directionId, search } = filters;
   const offset = (page - 1) * limit;
 
   const where = { del: 0 };
 
   if (statusStage) {
-    // Permet de filtrer sur plusieurs statuts à la fois (ex. "ACCEPTE,EN_COURS")
-    // pour les écrans "Vue globale" (ex. onglet "Stage en cours").
-    where.statusStage = statusStage.includes(',')
-      ? { [Op.in]: statusStage.split(',').map(s => s.trim()).filter(Boolean) }
-      : statusStage;
+    if (statusStage === 'RESOUMISE') {
+      // Statut virtuel : demandes rejetées puis resoumises par le candidat, en
+      // attente d'un nouvel examen (dateResoumission renseignée).
+      where.statusStage = 'EN_ATTENTE';
+      where.dateResoumission = { [Op.ne]: null };
+    } else if (statusStage.includes(',')) {
+      // Permet de filtrer sur plusieurs statuts à la fois (ex. "ACCEPTE,EN_COURS")
+      // pour les écrans "Vue globale" (ex. onglet "Stage en cours").
+      where.statusStage = { [Op.in]: statusStage.split(',').map(s => s.trim()).filter(Boolean) };
+    } else {
+      where.statusStage = statusStage;
+    }
   }
 
   if (typeStage) {
@@ -193,6 +200,10 @@ const getAllStages = async (filters = {}, agentContext = null) => {
 
   if (domaineStage) {
     where.domaineStage = { [Op.like]: `%${domaineStage}%` };
+  }
+
+  if (directionId) {
+    where.direction_iddirection = parseInt(directionId, 10);
   }
 
   // Directions de l'agent — utilisées pour filtrer la liste (rôle non-système)
