@@ -126,7 +126,7 @@ const updateStatut = async (req, res) => {
     await auditService.log({
       agentId:  req.user?.agentId,
       agentNom: req.user?.username,
-      action:   status === 'ACCEPTE' ? 'AUDIENCE_ACCEPTEE' : 'AUDIENCE_REJETEE',
+      action:   status === 'ACCEPTE' ? 'AUDIENCE_ACCEPTEE' : status === 'EN_ATTENTE' ? 'AUDIENCE_EN_ATTENTE' : 'AUDIENCE_REJETEE',
       module:   'AUDIENCE',
       entityId: demandeId,
       details:  { objet: "Demande d'audience", nom: demande.candidat?.nom || null, prenom: demande.candidat?.prenom || null, status, commentaireAdmin: commentaireAdmin || null, dateAudienceConfirmee: dateAudienceConfirmee || null, heureAudienceConfirmee: heureAudienceConfirmee || null },

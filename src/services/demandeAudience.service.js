@@ -215,11 +215,13 @@ const updateStatut = async (demandeId, status, commentaireAdmin = null, dateAudi
   demande.commentaireAdmin = commentaireAdmin;
   demande.lastModifiedDate = new Date();
 
-  // Date/heure fixées par l'agent à l'acceptation — optionnelles, sinon on garde
-  // la date/heure initialement souhaitée par le candidat.
   if (status === 'ACCEPTE') {
     if (dateAudienceConfirmee) demande.dateAudienceConfirmee = dateAudienceConfirmee;
     if (heureAudienceConfirmee) demande.heureAudienceConfirmee = heureAudienceConfirmee;
+  }
+  if (status === 'EN_ATTENTE') {
+    demande.dateAudienceConfirmee = null;
+    demande.heureAudienceConfirmee = null;
   }
 
   await demande.save();
