@@ -1,6 +1,8 @@
 // Test d'intégration : la validation dépend du mode de soumission (FICHIER vs
 // FORMULAIRE), avec des champs requis différents selon le cas — exactement le
 // genre de branchement qu'un refactor distrait peut casser silencieusement.
+// La direction concernée est désormais choisie en premier par le candidat et
+// obligatoire pour tout mode de soumission.
 jest.mock('../notification.service');
 // Évite d'écrire un vrai fichier sur disque pour le mode FICHIER.
 jest.mock('../../utils/fileStorage.util', () => ({
@@ -8,20 +10,51 @@ jest.mock('../../utils/fileStorage.util', () => ({
 }));
 
 const { resetDb } = require('../../__tests__/helpers/testDb');
-const { creerCandidat } = require('../../__tests__/helpers/fixtures');
+const { creerCandidat, creerDirection } = require('../../__tests__/helpers/fixtures');
 const demandeAudienceService = require('../demandeAudience.service');
 
 const fauxFichier = { buffer: Buffer.from('pdf'), originalname: 'lettre.pdf', size: 3 };
 
 describe('createDemandeByCandidat', () => {
+  let direction;
+
   beforeEach(async () => {
     await resetDb();
+    direction = await creerDirection();
+  });
+
+  describe('direction concernée', () => {
+    test('rejette une demande sans direction choisie', async () => {
+      const candidat = await creerCandidat();
+      await expect(
+        demandeAudienceService.createDemandeByCandidat(candidat.idcandidats, {
+          modeSoumission: 'FICHIER',
+          dateAudience: '2026-09-01',
+          heureAudience: '10:00',
+        }, fauxFichier)
+      ).rejects.toThrow('Veuillez choisir la direction concernée');
+    });
+
+    test('rejette une direction inexistante', async () => {
+      const candidat = await creerCandidat();
+      await expect(
+        demandeAudienceService.createDemandeByCandidat(candidat.idcandidats, {
+          modeSoumission: 'FICHIER',
+          direction_iddirection: 999999,
+          dateAudience: '2026-09-01',
+          heureAudience: '10:00',
+        }, fauxFichier)
+      ).rejects.toThrow('Direction sélectionnée introuvable');
+    });
   });
 
   test('rejette un mode de soumission invalide', async () => {
     const candidat = await creerCandidat();
     await expect(
-      demandeAudienceService.createDemandeByCandidat(candidat.idcandidats, { modeSoumission: 'AUTRE' }, null)
+      demandeAudienceService.createDemandeByCandidat(candidat.idcandidats, {
+        modeSoumission: 'AUTRE',
+        direction_iddirection: direction.iddirection,
+      }, null)
     ).rejects.toThrow('Mode de soumission invalide');
   });
 
@@ -31,6 +64,7 @@ describe('createDemandeByCandidat', () => {
       await expect(
         demandeAudienceService.createDemandeByCandidat(candidat.idcandidats, {
           modeSoumission: 'FICHIER',
+          direction_iddirection: direction.iddirection,
           dateAudience: '2026-09-01',
           heureAudience: '10:00',
         }, null)
@@ -40,7 +74,10 @@ describe('createDemandeByCandidat', () => {
     test('exige la date et l\'heure même avec un fichier', async () => {
       const candidat = await creerCandidat();
       await expect(
-        demandeAudienceService.createDemandeByCandidat(candidat.idcandidats, { modeSoumission: 'FICHIER' }, fauxFichier)
+        demandeAudienceService.createDemandeByCandidat(candidat.idcandidats, {
+          modeSoumission: 'FICHIER',
+          direction_iddirection: direction.iddirection,
+        }, fauxFichier)
       ).rejects.toThrow('La date et l\'heure sont requises');
     });
 
@@ -48,11 +85,13 @@ describe('createDemandeByCandidat', () => {
       const candidat = await creerCandidat();
       const demande = await demandeAudienceService.createDemandeByCandidat(candidat.idcandidats, {
         modeSoumission: 'FICHIER',
+        direction_iddirection: direction.iddirection,
         dateAudience: '2026-09-01',
         heureAudience: '10:00',
       }, fauxFichier);
 
       expect(demande.status).toBe('EN_ATTENTE');
+      expect(demande.direction_iddirection).toBe(direction.iddirection);
       expect(demande.fichier_filename).toBe('lettre.pdf');
       expect(demande.fichier).toBeUndefined(); // le BLOB ne doit jamais être renvoyé
     });
@@ -64,6 +103,7 @@ describe('createDemandeByCandidat', () => {
       await expect(
         demandeAudienceService.createDemandeByCandidat(candidat.idcandidats, {
           modeSoumission: 'FORMULAIRE',
+          direction_iddirection: direction.iddirection,
           dateAudience: '2026-09-01',
           heureAudience: '10:00',
           // pourM manquant
@@ -75,6 +115,7 @@ describe('createDemandeByCandidat', () => {
       const candidat = await creerCandidat();
       const demande = await demandeAudienceService.createDemandeByCandidat(candidat.idcandidats, {
         modeSoumission: 'FORMULAIRE',
+        direction_iddirection: direction.iddirection,
         pourM: 'Le Directeur Général',
         dateAudience: '2026-09-01',
         heureAudience: '10:00',
@@ -82,6 +123,7 @@ describe('createDemandeByCandidat', () => {
       }, null);
 
       expect(demande.status).toBe('EN_ATTENTE');
+      expect(demande.direction_iddirection).toBe(direction.iddirection);
       expect(demande.pourM).toBe('Le Directeur Général');
     });
   });

@@ -355,6 +355,34 @@ const onIpBannie = async ({ ip, pattern, path, method, attempts, bannedUntil, pe
   });
 };
 
+/**
+ * Alerte les administrateurs qu'un compte vient d'être verrouillé suite à trop
+ * de tentatives de connexion échouées consécutives (brute-force probable).
+ */
+const onCompteVerrouille = async ({ username, attempts, lockedUntil, ip }) => {
+  const html = emailService.buildBaseTemplate(`
+    <p class="greeting">Alerte sécurité</p>
+    <p class="message">
+      Le compte <strong>${username}</strong> vient d'être verrouillé automatiquement
+      après ${attempts} tentatives de connexion échouées consécutives.
+    </p>
+    <div class="info-box">
+      ${ip ? `<p><strong>Adresse IP :</strong> ${ip}</p>` : ''}
+      <p><strong>Verrouillé jusqu'au :</strong> ${new Date(lockedUntil).toLocaleString('fr-FR')}</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${FRONTEND}/dashboard/admin/securite" class="button">Voir la page Sécurité</a>
+    </div>
+  `, 'Alerte sécurité — Compte verrouillé');
+
+  await notifyAdmins(`🔒 Alerte sécurité — Compte "${username}" verrouillé`, html, {
+    type: 'SECURITE_COMPTE_VERROUILLE',
+    titre: 'Compte verrouillé',
+    message: `Le compte "${username}" a été verrouillé après ${attempts} tentatives de connexion échouées.`,
+    link: `${FRONTEND}/dashboard/admin/securite`,
+  });
+};
+
 // =====================================================
 // INITIALISER LES PREFS D'UN NOUVEL AGENT
 // =====================================================
@@ -441,6 +469,7 @@ module.exports = {
   onNouvelleDemandeAide,
   onNouvelleDemandeAudience,
   onIpBannie,
+  onCompteVerrouille,
   broadcastCandidats,
   broadcastCandidatsWithInApp,
 };

@@ -110,15 +110,18 @@ async function genLineChart(labels, data) {
 }
 
 // ── Utilitaires PDF ─────────────────────────────────────────
-function pageCourante(doc) {
-  return doc.bufferedPageRange().start + doc.bufferedPageRange().count;
-}
-
 function drawPageNumber(doc, pageNum) {
+  // Le texte est dessiné dans la marge basse (sous la zone de contenu), ce qui
+  // fait croire à PDFKit qu'il déborde de la page et déclenche l'ajout
+  // automatique d'une page fantôme. On désactive temporairement la marge basse
+  // le temps de dessiner le numéro, à l'endroit exact prévu pour lui.
+  const bottomMargin = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0;
   doc.save()
     .fontSize(8).fillColor(GRIS)
-    .text(`Page ${pageNum}`, 0, doc.page.height - 30, { align: 'center', width: doc.page.width })
+    .text(`Page ${pageNum}`, 0, doc.page.height - 30, { align: 'center', width: doc.page.width, lineBreak: false })
     .restore();
+  doc.page.margins.bottom = bottomMargin;
 }
 
 function footerLine(doc) {
@@ -135,23 +138,27 @@ function pageCouverture(doc, { titre, module, total, periode }) {
   doc.rect(0, 0, doc.page.width, 200).fill(ROUGE);
 
   // Logo / Nom institution
-  doc.fontSize(11).fillColor(BLANC).font('Helvetica')
+  doc.fontSize(11).fillColor(BLANC).font('Times-Roman')
     .text('SONABHY', 50, 40, { align: 'left' });
   doc.fontSize(9).fillColor('rgba(255,255,255,0.7)')
     .text('Société Nationale Burkinabè d\'Hydrocarbures', 50, 56);
 
   // Titre rapport
-  doc.fontSize(24).fillColor(BLANC).font('Helvetica-Bold')
+  doc.fontSize(24).fillColor(BLANC).font('Times-Bold')
     .text(titre, 50, 100, { width: doc.page.width - 100 });
 
-  // Module badge
-  doc.roundedRect(50, 155, 120, 24, 4).fill('rgba(255,255,255,0.2)');
-  doc.fontSize(9).fillColor(BLANC).font('Helvetica')
+  // Module badge — PDFKit ne comprend pas la notation CSS rgba(), d'où le
+  // rectangle blanc opaque (texte blanc invisible) si on la passe à .fill().
+  // On simule la translucidité avec fillOpacity() à la place.
+  doc.save();
+  doc.fillOpacity(0.2).roundedRect(50, 155, 120, 24, 4).fill(BLANC);
+  doc.restore();
+  doc.fontSize(9).fillColor(BLANC).font('Times-Roman')
     .text(module, 50, 162, { width: 120, align: 'center' });
 
   // Corps
   const y = 240;
-  doc.fontSize(11).fillColor(NOIR).font('Helvetica-Bold')
+  doc.fontSize(11).fillColor(NOIR).font('Times-Bold')
     .text('Résumé du rapport', 50, y);
   doc.moveTo(50, y + 18).lineTo(200, y + 18).strokeColor(ROUGE).lineWidth(2).stroke();
 
@@ -164,20 +171,20 @@ function pageCouverture(doc, { titre, module, total, periode }) {
   ];
   stats.forEach((s, i) => {
     const sy = y + 36 + i * 28;
-    doc.fontSize(9).fillColor(GRIS).font('Helvetica').text(s.label, 50, sy);
-    doc.fontSize(11).fillColor(NOIR).font('Helvetica-Bold').text(String(s.val), 280, sy);
+    doc.fontSize(9).fillColor(GRIS).font('Times-Roman').text(s.label, 50, sy);
+    doc.fontSize(11).fillColor(NOIR).font('Times-Bold').text(String(s.val), 280, sy);
   });
 
   // Ligne séparatrice bas
   doc.moveTo(50, y + 160).lineTo(doc.page.width - 50, y + 160).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
-  doc.fontSize(8).fillColor(GRIS).font('Helvetica')
-    .text('Document généré automatiquement par la plateforme PARES', 50, y + 172, { align: 'center', width: doc.page.width - 100 });
+  doc.fontSize(8).fillColor(GRIS).font('Times-Roman')
+    .text('Document généré automatiquement par la plateforme PORTAIL SONABHY', 50, y + 172, { align: 'center', width: doc.page.width - 100 });
 }
 
 // ── En-tête de section ────────────────────────────────────────
 function sectionHeader(doc, titre, y) {
   doc.rect(50, y, doc.page.width - 100, 26).fill(ROUGE);
-  doc.fontSize(11).fillColor(BLANC).font('Helvetica-Bold')
+  doc.fontSize(11).fillColor(BLANC).font('Times-Bold')
     .text(titre, 58, y + 7);
   return y + 40;
 }
@@ -189,9 +196,9 @@ function drawStatCards(doc, stats, y) {
     const x = 50 + i * (cardW + 10);
     doc.rect(x, y, cardW, 60).fill(GRIS_C);
     doc.rect(x, y, 3, 60).fill(s.color || ROUGE);
-    doc.fontSize(18).fillColor(s.color || ROUGE).font('Helvetica-Bold')
+    doc.fontSize(18).fillColor(s.color || ROUGE).font('Times-Bold')
       .text(String(s.val), x + 10, y + 10, { width: cardW - 15 });
-    doc.fontSize(8).fillColor(GRIS).font('Helvetica')
+    doc.fontSize(8).fillColor(GRIS).font('Times-Roman')
       .text(s.label, x + 10, y + 36, { width: cardW - 15 });
   });
   return y + 76;
@@ -208,8 +215,8 @@ function drawTable(doc, colonnes, lignes, startY) {
   doc.rect(50, y, tableW, 20).fill('#1e293b');
   let x = 50;
   colonnes.forEach((col, i) => {
-    doc.fontSize(8).fillColor(BLANC).font('Helvetica-Bold')
-      .text(col.label, x + 4, y + 6, { width: colW[i] - 8, ellipsis: true });
+    doc.fontSize(8).fillColor(BLANC).font('Times-Bold')
+      .text(col.label, x + 4, y + 6, { width: colW[i] - 8, height: 10, ellipsis: true });
     x += colW[i];
   });
   y += 20;
@@ -217,15 +224,15 @@ function drawTable(doc, colonnes, lignes, startY) {
   // Lignes
   lignes.forEach((row, ri) => {
     if (y > pageH) {
-      footerLine(doc);
-      drawPageNumber(doc, pageCourante(doc));
+      // Le pied de page (ligne + numéro) est ajouté a posteriori sur toutes les
+      // pages en une seule passe finale — voir genererRapportPDF.
       doc.addPage();
       y = 50;
       // Répéter l'en-tête
       doc.rect(50, y, tableW, 20).fill('#1e293b');
       let xh = 50;
       colonnes.forEach((col, i) => {
-        doc.fontSize(8).fillColor(BLANC).font('Helvetica-Bold')
+        doc.fontSize(8).fillColor(BLANC).font('Times-Bold')
           .text(col.label, xh + 4, y + 6, { width: colW[i] - 8, ellipsis: true });
         xh += colW[i];
       });
@@ -243,8 +250,8 @@ function drawTable(doc, colonnes, lignes, startY) {
       // Colorier les statuts
       const isStatut = col.key === 'statut' || col.key === 'status' || col.key === 'statusOffre' || col.key === 'statusAide';
       const color = isStatut ? (STATUT_COULEURS[val] || NOIR) : NOIR;
-      doc.fontSize(7.5).fillColor(color).font(isStatut ? 'Helvetica-Bold' : 'Helvetica')
-        .text(val, cx + 4, y + 5, { width: colW[i] - 8, ellipsis: true });
+      doc.fontSize(7.5).fillColor(color).font(isStatut ? 'Times-Bold' : 'Times-Roman')
+        .text(val, cx + 4, y + 5, { width: colW[i] - 8, height: 9, ellipsis: true });
       cx += colW[i];
     });
     y += rowH;
@@ -265,6 +272,7 @@ async function genererRapportPDF({
   lignes,
 }) {
   const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true });
+  doc.font('Times-Roman'); // police par défaut pour tout texte sans .font() explicite (ex. numéros de page)
   const chunks = [];
   doc.on('data', c => chunks.push(c));
 
@@ -301,28 +309,19 @@ async function genererRapportPDF({
     parStatut.forEach(s => {
       const c = STATUT_COULEURS[s.key] || BLEU;
       doc.rect(310, ly, 10, 10).fill(c);
-      doc.fontSize(9).fillColor(NOIR).font('Helvetica')
+      doc.fontSize(9).fillColor(NOIR).font('Times-Roman')
         .text(`${s.label} : `, 326, ly + 1, { continued: true })
-        .font('Helvetica-Bold').text(String(s.count));
+        .font('Times-Bold').text(String(s.count));
       ly += 18;
     });
     y += 158;
   }
 
-  if (parDirection.length > 0 && y + 160 < doc.page.height - 80) {
-    y = sectionHeader(doc, 'Répartition par direction', y);
-    const barBuf = await genBarChart(
-      parDirection.map(d => d.label),
-      parDirection.map(d => d.count),
-      parDirection.map(() => ROUGE)
-    );
-    doc.image(barBuf, 50, y, { width: doc.page.width - 100, height: 150 });
-    y += 168;
-  } else if (parDirection.length > 0) {
-    footerLine(doc);
-    drawPageNumber(doc, pageCourante(doc));
-    doc.addPage({ margin: 50 });
-    y = 50;
+  if (parDirection.length > 0) {
+    if (y + 160 >= doc.page.height - 80) {
+      doc.addPage({ margin: 50 });
+      y = 50;
+    }
     y = sectionHeader(doc, 'Répartition par direction', y);
     const barBuf = await genBarChart(
       parDirection.map(d => d.label),
@@ -335,8 +334,6 @@ async function genererRapportPDF({
 
   if (parMois.length > 0) {
     if (y + 170 > doc.page.height - 80) {
-      footerLine(doc);
-      drawPageNumber(doc, pageCourante(doc));
       doc.addPage({ margin: 50 });
       y = 50;
     }
@@ -350,16 +347,25 @@ async function genererRapportPDF({
   }
 
   // ─ Pages suivantes : tableau détaillé ─
-  footerLine(doc);
-  drawPageNumber(doc, pageCourante(doc));
   doc.addPage({ margin: 50 });
   y = 50;
   y = sectionHeader(doc, 'Liste détaillée', y);
   drawTable(doc, colonnes, lignes, y);
 
-  // Numéroter la dernière page
-  footerLine(doc);
-  drawPageNumber(doc, pageCourante(doc));
+  // ─ Pied de page (ligne + numéro) sur toutes les pages, en une seule passe
+  // finale — avec bufferPages:true, ajouter le pied de page AVANT chaque
+  // doc.addPage() provoquait des pages fantômes quasi vides (le texte du
+  // numéro se retrouvait décalé sur la page suivante). En le faisant après
+  // coup via switchToPage(), chaque page reçoit son pied de page une seule
+  // fois, au bon endroit.
+  // La page de garde (index 0) a son propre pied de page dédié — elle n'est
+  // jamais numérotée, comme avant.
+  const range = doc.bufferedPageRange();
+  for (let i = range.start + 1; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    footerLine(doc);
+    drawPageNumber(doc, i + 1);
+  }
 
   doc.end();
 
@@ -411,4 +417,9 @@ function calcParDirection(items) {
     .map(([label, count]) => ({ label, count }));
 }
 
-module.exports = { genererRapportPDF, calcParMois, calcParStatut, calcParDirection };
+module.exports = {
+  genererRapportPDF, calcParMois, calcParStatut, calcParDirection,
+  // Réutilisés par excel.service.js pour insérer les mêmes graphiques dans les
+  // exports Excel (images PNG — cohérent visuellement avec le rapport PDF).
+  genBarChart, genDonutChart, STATUT_COULEURS,
+};

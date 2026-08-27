@@ -2,13 +2,22 @@
 const fileStorage = require('../utils/fileStorage.util');
 const { DemandeAudience, Candidat, Direction } = require('../models');
 const notifService = require('./notification.service');
-const settingsService = require('./settings.service');
 
 // ─────────────────────────────────────────────────────────────
 // CRÉER UNE DEMANDE D'AUDIENCE (par un candidat)
 // ─────────────────────────────────────────────────────────────
 const createDemandeByCandidat = async (candidatId, data, file) => {
   const modeSoumission = data.modeSoumission;
+
+  // La direction concernée est choisie par le candidat en premier — obligatoire
+  // pour toute demande, quel que soit le mode de soumission ensuite.
+  if (!data.direction_iddirection) {
+    throw new Error('Veuillez choisir la direction concernée par votre demande');
+  }
+  const directionChoisie = await Direction.findOne({ where: { iddirection: data.direction_iddirection, del: 0 } });
+  if (!directionChoisie) {
+    throw new Error('Direction sélectionnée introuvable');
+  }
 
   // Validation selon le mode
   if (modeSoumission === 'FICHIER') {
@@ -28,6 +37,7 @@ const createDemandeByCandidat = async (candidatId, data, file) => {
 
   const demandeData = {
     candidats_idcandidats: candidatId,
+    direction_iddirection: directionChoisie.iddirection,
     modeSoumission,
     dateAudience: data.dateAudience,
     heureAudience: data.heureAudience,
@@ -49,15 +59,6 @@ const createDemandeByCandidat = async (candidatId, data, file) => {
     demandeData.contact = data.contact || null;
     demandeData.actionCochee = data.actionCochee || null;
     demandeData.motif = data.motif || null;
-  }
-
-  // Auto-affecter la direction de l'agent par défaut si configuré
-  try {
-    const settings = await settingsService.getSettings();
-    const dirId = await settingsService.resolveDefaultAgentDirection(settings.routage?.agentDefautAudience);
-    if (dirId) demandeData.direction_iddirection = dirId;
-  } catch (e) {
-    console.error('⚠️ Routage audience: impossible de résoudre l\'agent par défaut:', e.message);
   }
 
   const demande = await DemandeAudience.create(demandeData);
@@ -246,9 +247,12 @@ const updateStatut = async (demandeId, status, commentaireAdmin = null, dateAudi
     }
   })();
 
-  const result = demande.toJSON();
-  delete result.fichier;
-  return result;
+  return demande.reload({
+    include: [
+      { model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom', 'telephone', 'email'] },
+    ],
+    attributes: { exclude: ['fichier'] },
+  });
 };
 
 // ─────────────────────────────────────────────────────────────

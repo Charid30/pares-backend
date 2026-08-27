@@ -117,7 +117,13 @@ const evaluateAide = async (req, res) => {
       action:   statusAide === 'VALIDEE' ? 'AIDE_VALIDEE' : 'AIDE_REJETEE',
       module:   'AIDE',
       entityId: parseInt(req.params.id),
-      details:  { statusAide, motifRefus: req.body.motifRefus || null },
+      details:  {
+        objet:  `Aide — ${aide.titre || aide.typeAide || ''}`,
+        nom:    aide.candidatCreateur?.nom    || null,
+        prenom: aide.candidatCreateur?.prenom || null,
+        statusAide,
+        motifRefus: req.body.motifRefus || null,
+      },
       ip: req.ip,
     });
     return success(res, aide, 'Aide évaluée avec succès');

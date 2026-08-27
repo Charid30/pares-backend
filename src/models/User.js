@@ -43,6 +43,18 @@ module.exports = (sequelize) => {
       allowNull: true,
       defaultValue: null,
     },
+    failedLoginAttempts: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      comment: 'Tentatives de connexion échouées consécutives — remis à 0 dès qu\'une connexion réussit',
+    },
+    lockedUntil: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Verrouillage temporaire du compte après trop d\'échecs de connexion consécutifs',
+    },
   }, {
     tableName: 'users',
     timestamps: false,

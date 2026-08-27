@@ -142,7 +142,13 @@ const evaluateOffre = async (req, res) => {
       action:   statusOffre === 'VALIDEE' ? 'OFFRE_VALIDEE' : 'OFFRE_REJETEE',
       module:   'OFFRE',
       entityId: parseInt(req.params.id),
-      details:  { statusOffre, motifRefus: req.body.motifRefus || null },
+      details:  {
+        objet:  `Offre — ${offre.titre || offre.typeOffre || ''}`,
+        nom:    offre.candidatCreateur?.nom    || null,
+        prenom: offre.candidatCreateur?.prenom || null,
+        statusOffre,
+        motifRefus: req.body.motifRefus || null,
+      },
       ip: req.ip,
     });
     return success(res, offre, 'Offre évaluée avec succès');
@@ -394,7 +400,7 @@ const transfererOffre = async (req, res) => {
       action:   'OFFRE_TRANSFEREE',
       module:   'OFFRE',
       entityId: offreId,
-      details:  { direction_iddirection },
+      details:  { objet: `Offre — ${offre.titre || offre.typeOffre || ''}`, nom: offre.candidatCreateur?.nom || null, prenom: offre.candidatCreateur?.prenom || null, direction_iddirection },
       ip: req.ip,
     });
     return success(res, offre, 'Offre transférée avec succès');

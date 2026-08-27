@@ -239,6 +239,9 @@ const updateStatusStage = async (req, res) => {
       module:   'STAGE',
       entityId: parseInt(req.params.id),
       details: {
+        objet: `Stage ${stage.typeStage === 'SOUTENANCE' ? 'soutenance' : 'perfectionnement'} — ${stage.domaineStage || ''}`,
+        nom:    stage.candidat?.nom    || null,
+        prenom: stage.candidat?.prenom || null,
         statusStage,
         motifRefus:          req.body.motifRefus          || null,
         dateDebutEffective:  req.body.dateDebutEffective  || null,
@@ -372,7 +375,13 @@ const evaluateRenouvellement = async (req, res) => {
       action:   statut === 'ACCEPTE' ? 'RENOUVELLEMENT_ACCEPTE' : 'RENOUVELLEMENT_REJETE',
       module:   'STAGE',
       entityId: parseInt(req.params.id),
-      details:  { statut, motifRefus: req.body.motifRefus || null },
+      details:  {
+        objet:  'Demande de renouvellement de stage',
+        nom:    renouvellement.stageNouveau?.candidat?.nom    || null,
+        prenom: renouvellement.stageNouveau?.candidat?.prenom || null,
+        statut,
+        motifRefus: req.body.motifRefus || null,
+      },
       ip: req.ip,
     });
     return success(res, renouvellement, 'Renouvellement évalué avec succès');
@@ -488,7 +497,13 @@ const evaluateRapport = async (req, res) => {
       action:   statutRapport === 'VALIDE' ? 'RAPPORT_VALIDE' : 'RAPPORT_REJETE',
       module:   'STAGE',
       entityId: parseInt(req.params.id),
-      details:  { statutRapport, motifRefus: req.body.motifRefus || null },
+      details:  {
+        objet:  'Rapport de stage',
+        nom:    rapport.stage?.candidat?.nom    || null,
+        prenom: rapport.stage?.candidat?.prenom || null,
+        statutRapport,
+        motifRefus: req.body.motifRefus || null,
+      },
       ip: req.ip,
     });
     return success(res, rapport, 'Rapport évalué avec succès');
@@ -581,13 +596,16 @@ const downloadDocumentStage = async (req, res) => {
 };
 
 /**
- * Exporter les stages en CSV
+ * Exporter les stages en Excel (.xlsx) — mise en forme, police et
+ * graphiques ne sont pas possibles en CSV, d'où le passage à un vrai
+ * classeur Excel.
  * GET /api/stages/export
  */
 const exportStages = async (req, res) => {
   try {
-    const { Stage, Candidat } = require('../models');
-    const { Op } = require('sequelize');
+    const { Stage, Candidat, Direction } = require('../models');
+    const { genererRapportExcel } = require('../services/excel.service');
+    const { calcParStatut, calcParDirection } = require('../services/pdf.service');
 
     const where = { del: 0 };
     if (req.query.statusStage) where.statusStage = req.query.statusStage;
@@ -595,11 +613,19 @@ const exportStages = async (req, res) => {
 
     const stages = await Stage.findAll({
       where,
-      include: [{
-        model: Candidat,
-        as: 'candidat',
-        attributes: ['nom', 'prenom', 'email', 'telephone'],
-      }],
+      include: [
+        {
+          model: Candidat,
+          as: 'candidat',
+          attributes: ['nom', 'prenom', 'email', 'telephone'],
+        },
+        {
+          model: Direction,
+          as: 'direction',
+          attributes: ['nom', 'accronyme'],
+          required: false,
+        },
+      ],
       attributes: [
         'idstage', 'typeStage', 'typeEtablissement', 'niveau', 'domaineStage',
         'dureeStage', 'dateDebutSouhaitee', 'dateDebutEffective', 'dateFinEffective',
@@ -611,45 +637,66 @@ const exportStages = async (req, res) => {
     // Formater une date ISO en JJ/MM/AAAA
     const fmt = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '';
 
-    const headers = [
-      'N°', 'Nom', 'Prénom', 'Email', 'Téléphone',
-      'Type stage', 'Établissement', 'Niveau', 'Domaine', 'Durée (mois)',
-      'Date soumission', 'Date début souhaitée', 'Date début effective', 'Date fin effective',
-      'Statut', 'Motif refus', 'Renouvellement',
-    ];
+    const total     = stages.length;
+    const enAttente = stages.filter(s => s.statusStage === 'EN_ATTENTE').length;
+    const acceptes  = stages.filter(s => ['PROGRAMMATION_EN_COURS', 'ACCEPTE', 'EN_COURS', 'TERMINE'].includes(s.statusStage)).length;
+    const rejetes   = stages.filter(s => s.statusStage === 'REJETE').length;
 
-    const rows = stages.map((s, i) => [
-      i + 1,
-      s.candidat?.nom        || '',
-      s.candidat?.prenom     || '',
-      s.candidat?.email      || '',
-      s.candidat?.telephone  || '',
-      s.typeStage            || '',
-      s.typeEtablissement    || '',
-      s.niveau               || '',
-      s.domaineStage         || '',
-      s.dureeStage           || '',
-      fmt(s.createdDate),
-      fmt(s.dateDebutSouhaitee),
-      fmt(s.dateDebutEffective),
-      fmt(s.dateFinEffective),
-      s.statusStage          || '',
-      s.motifRefus           || '',
-      s.estRenouvellement ? 'Oui' : 'Non',
-    ]);
-
-    const csvEscape = (v) => `"${String(v).replace(/"/g, '""')}"`;
-    const sep = ';';
-    const lines = [
-      headers.map(csvEscape).join(sep),
-      ...rows.map(r => r.map(csvEscape).join(sep)),
-    ];
-    const csv = '\uFEFF' + lines.join('\r\n'); // BOM UTF-8 pour Excel FR
+    const excelBuffer = await genererRapportExcel({
+      titre: 'Rapport des Demandes de Stage',
+      module: 'STAGES',
+      statsCards: [
+        { label: 'Total demandes', val: total,     color: '#0f172a' },
+        { label: 'En attente',     val: enAttente, color: '#f59e0b' },
+        { label: 'Acceptés',       val: acceptes,  color: '#16a34a' },
+        { label: 'Rejetés',        val: rejetes,   color: '#dc2626' },
+      ],
+      parStatut:    calcParStatut(stages, 'statusStage'),
+      parDirection: calcParDirection(stages),
+      colonnes: [
+        { label: 'N°',                    key: 'num',               width: 30 },
+        { label: 'Nom',                   key: 'nom',               width: 90 },
+        { label: 'Prénom',                key: 'prenom',            width: 90 },
+        { label: 'Email',                 key: 'email',             width: 140 },
+        { label: 'Téléphone',             key: 'telephone',         width: 80 },
+        { label: 'Type stage',            key: 'typeStage',         width: 90 },
+        { label: 'Établissement',         key: 'typeEtablissement', width: 70 },
+        { label: 'Niveau',                key: 'niveau',            width: 60 },
+        { label: 'Domaine',               key: 'domaine',           width: 130 },
+        { label: 'Durée (mois)',          key: 'duree',             width: 60 },
+        { label: 'Date soumission',       key: 'dateSoumission',    width: 70 },
+        { label: 'Date début souhaitée',  key: 'dateDebut',         width: 80 },
+        { label: 'Date début effective',  key: 'dateDebutEff',      width: 80 },
+        { label: 'Date fin effective',    key: 'dateFinEff',        width: 80 },
+        { label: 'Statut',                key: 'statut',            width: 80 },
+        { label: 'Motif refus',           key: 'motifRefus',        width: 200 },
+        { label: 'Renouvellement',        key: 'renouvellement',    width: 60 },
+      ],
+      lignes: stages.map((s, i) => ({
+        num:               i + 1,
+        nom:               s.candidat?.nom        || '',
+        prenom:            s.candidat?.prenom     || '',
+        email:             s.candidat?.email      || '',
+        telephone:         s.candidat?.telephone  || '',
+        typeStage:         s.typeStage            || '',
+        typeEtablissement: s.typeEtablissement    || '',
+        niveau:            s.niveau               || '',
+        domaine:           s.domaineStage         || '',
+        duree:             s.dureeStage           || '',
+        dateSoumission:    fmt(s.createdDate),
+        dateDebut:         fmt(s.dateDebutSouhaitee),
+        dateDebutEff:      fmt(s.dateDebutEffective),
+        dateFinEff:        fmt(s.dateFinEffective),
+        statut:            s.statusStage          || '',
+        motifRefus:        s.motifRefus           || '',
+        renouvellement:    s.estRenouvellement ? 'Oui' : 'Non',
+      })),
+    });
 
     const today = new Date().toISOString().slice(0, 10);
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="stages_${today}.csv"`);
-    return res.send(csv);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="stages_${today}.xlsx"`);
+    return res.send(Buffer.from(excelBuffer));
   } catch (err) {
     return error(res, err.message, 500);
   }
@@ -672,7 +719,10 @@ const exportStagesPDF = async (req, res) => {
     const fmt = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '';
     const total      = stages.length;
     const enAttente  = stages.filter(s => s.statusStage === 'EN_ATTENTE').length;
-    const valides    = stages.filter(s => ['VALIDE', 'EN_COURS', 'TERMINEE'].includes(s.statusStage)).length;
+    // Anciennement 'VALIDE'/'TERMINEE' — ces statuts n'existent pas sur Stage
+    // (les vraies valeurs sont ACCEPTE/PROGRAMMATION_EN_COURS/EN_COURS/TERMINE),
+    // le compteur "Acceptés" affichait donc toujours une valeur fausse.
+    const valides    = stages.filter(s => ['PROGRAMMATION_EN_COURS', 'ACCEPTE', 'EN_COURS', 'TERMINE'].includes(s.statusStage)).length;
     const rejetes    = stages.filter(s => s.statusStage === 'REJETE').length;
 
     const pdf = await genererRapportPDF({
@@ -687,16 +737,19 @@ const exportStagesPDF = async (req, res) => {
       parStatut:    calcParStatut(stages, 'statusStage'),
       parDirection: calcParDirection(stages),
       parMois:      calcParMois(stages, 'createdDate'),
+      // Largeurs ajustées pour tenir dans la zone imprimable (495pt) sans
+      // déborder — la somme dépassait auparavant 495pt, ce qui poussait les
+      // dernières colonnes hors du tableau dessiné.
       colonnes: [
         { label: 'N°',         key: 'num',         width: 25 },
-        { label: 'Nom',        key: 'nom',         width: 75 },
-        { label: 'Prénom',     key: 'prenom',      width: 75 },
-        { label: 'Type',       key: 'typeStage',   width: 65 },
-        { label: 'Domaine',    key: 'domaine',     width: 80 },
-        { label: 'Durée',      key: 'duree',       width: 35 },
-        { label: 'Dép. souh.',  key: 'dateDebut',  width: 55 },
-        { label: 'Statut',     key: 'statusStage', width: 65 },
-        { label: 'Soumission', key: 'soumission',  width: 48 },
+        { label: 'Nom',        key: 'nom',         width: 58 },
+        { label: 'Prénom',     key: 'prenom',      width: 55 },
+        { label: 'Type',       key: 'typeStage',   width: 78 },
+        { label: 'Domaine',    key: 'domaine',     width: 82 },
+        { label: 'Durée',      key: 'duree',       width: 34 },
+        { label: 'Dép. souh.',  key: 'dateDebut',  width: 52 },
+        { label: 'Statut',     key: 'statusStage', width: 60 },
+        { label: 'Soumission', key: 'soumission',  width: 51 },
       ],
       lignes: stages.map((s, i) => ({
         num:         i + 1,
@@ -793,7 +846,12 @@ const exigerDocuments = async (req, res) => {
       action:   'STAGE_DOCUMENT_EXIGE',
       module:   'STAGE',
       entityId: Number(req.params.id),
-      details:  { types },
+      details:  {
+        objet:  'Demande de stage',
+        nom:    stage.candidat?.nom    || null,
+        prenom: stage.candidat?.prenom || null,
+        types,
+      },
       ip:       req.ip,
     });
 
@@ -852,7 +910,13 @@ const approuverStage = async (req, res) => {
       action:   'STAGE_APPROUVE',
       module:   'STAGE',
       entityId: parseInt(req.params.id),
-      details:  { statusStage: 'PROGRAMMATION_EN_COURS', dateDebutProposee: req.body.dateDebutProposee || null },
+      details:  {
+        objet:  'Demande de stage',
+        nom:    stage.candidat?.nom    || null,
+        prenom: stage.candidat?.prenom || null,
+        statusStage: 'PROGRAMMATION_EN_COURS',
+        dateDebutProposee: req.body.dateDebutProposee || null,
+      },
       ip: req.ip,
     });
     return success(res, stage, 'Stage approuvé avec succès');
@@ -881,7 +945,12 @@ const autoriserRenouvellement = async (req, res) => {
       action:   'STAGE_RENOUVELLEMENT_AUTORISE',
       module:   'STAGE',
       entityId: parseInt(req.params.id),
-      details:  { expiresAt: autorisation.expiresAt },
+      details:  {
+        objet:  'Autorisation de renouvellement de stage',
+        nom:    autorisation.candidat?.nom    || null,
+        prenom: autorisation.candidat?.prenom || null,
+        expiresAt: autorisation.expiresAt,
+      },
       ip: req.ip,
     });
     return success(res, autorisation, 'Autorisation de renouvellement accordée (7 jours)');

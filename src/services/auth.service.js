@@ -1,10 +1,58 @@
 // src/services/auth.service.js
 const crypto = require('crypto');
 const { Op } = require('sequelize');
-const { User, Candidat, Role, Agent, UserAgent, Permission, PasswordResetToken, Service, Direction } = require('../models');
+const { User, Candidat, Role, Agent, UserAgent, Permission, PasswordResetToken, Service, Direction, AuditLog } = require('../models');
 const { generateToken } = require('../utils/jwt.util');
 const { sendPasswordResetEmail } = require('./email.service');
 const { getAgentDirections } = require('../utils/agentDirections.util');
+const notifService = require('./notification.service');
+
+const LOCKOUT_THRESHOLD = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * Comptabilise un échec de connexion et verrouille le compte au-delà du seuil.
+ * Retourne true si cet échec vient de déclencher le verrouillage (pour adapter
+ * le message d'erreur renvoyé à l'appelant).
+ */
+const handleFailedLogin = async (user, ip) => {
+  user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+  const justLocked = user.failedLoginAttempts >= LOCKOUT_THRESHOLD;
+
+  if (justLocked) {
+    user.lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MS);
+  }
+  await user.save();
+
+  if (justLocked) {
+    try {
+      await AuditLog.create({
+        agent_id: null,
+        agent_nom: null,
+        action: 'COMPTE_VERROUILLE',
+        module: 'SECURITE',
+        entity_id: user.idusers,
+        details: {
+          username: user.username,
+          attempts: user.failedLoginAttempts,
+          lockedUntil: user.lockedUntil,
+        },
+        ip_address: ip || null,
+      });
+    } catch (e) {
+      console.error('[Auth] Erreur journalisation verrouillage:', e.message);
+    }
+
+    notifService.onCompteVerrouille({
+      username: user.username,
+      attempts: user.failedLoginAttempts,
+      lockedUntil: user.lockedUntil,
+      ip,
+    }).catch(() => {});
+  }
+
+  return justLocked;
+};
 
 /**
  * Calcule l'ensemble effectif des rôles d'un utilisateur :
@@ -267,9 +315,19 @@ const login = async (identifier, password, rememberMe = false, ip = null) => {
     throw new Error('Identifiant ou mot de passe incorrect');
   }
 
+  // Compte temporairement verrouillé suite à trop d'échecs de connexion consécutifs
+  if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
+    const minutesRestantes = Math.ceil((new Date(user.lockedUntil) - Date.now()) / 60000);
+    throw new Error(`Compte temporairement verrouillé suite à trop de tentatives échouées. Réessayez dans ${minutesRestantes} min.`);
+  }
+
   // Vérifier le mot de passe
   const isPasswordValid = await user.comparePassword(password);
   if (!isPasswordValid) {
+    const justLocked = await handleFailedLogin(user, ip);
+    if (justLocked) {
+      throw new Error('Trop de tentatives échouées. Votre compte est verrouillé pendant 15 minutes.');
+    }
     throw new Error('Nom d\'utilisateur ou mot de passe incorrect');
   }
 
@@ -282,12 +340,15 @@ const login = async (identifier, password, rememberMe = false, ip = null) => {
     throw new Error('Ce compte a été désactivé. Contactez l\'administrateur.');
   }
 
-  // Traçabilité de connexion — sert à corréler une IP suspecte à un compte enregistré
+  // Connexion réussie : réinitialiser le compteur d'échecs et tracer l'IP —
+  // sert à corréler une IP suspecte à un compte enregistré
+  user.failedLoginAttempts = 0;
+  user.lockedUntil = null;
   if (ip) {
     user.last_login_ip = ip;
     user.last_login_at = new Date();
-    await user.save();
   }
+  await user.save();
 
   // Calculer l'ensemble effectif des rôles : principal + additionnels
   const effective = computeEffectiveRoles(user);

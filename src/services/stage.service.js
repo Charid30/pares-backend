@@ -174,7 +174,7 @@ const createStage = async (candidatId, data, files) => {
  *   Si absent ou isSystemRole=true, tous les stages sont retournés.
  */
 const getAllStages = async (filters = {}, agentContext = null) => {
-  const { page = 1, limit = 10, statusStage, typeStage, domaineStage, directionId, search } = filters;
+  const { page = 1, limit = 10, statusStage, excludeStatus, typeStage, domaineStage, directionId, search } = filters;
   const offset = (page - 1) * limit;
 
   const where = { del: 0 };
@@ -192,6 +192,10 @@ const getAllStages = async (filters = {}, agentContext = null) => {
     } else {
       where.statusStage = statusStage;
     }
+  } else if (excludeStatus) {
+    // Archivage automatique (ex. REJETE) : masqué de la liste principale par
+    // défaut, sans empêcher un filtre explicite (statusStage) de le retrouver.
+    where.statusStage = { [Op.ne]: excludeStatus };
   }
 
   if (typeStage) {
@@ -969,6 +973,7 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
       {
         model: Stage,
         as: 'stageNouveau',
+        include: [{ model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom'] }],
       },
       {
         model: Stage,
@@ -1714,7 +1719,10 @@ const deleteStage = async (stageId) => {
 const approuverStage = async (stageId, agentUsername, agentContext = null, dateDebutProposee = null) => {
   const stage = await Stage.findOne({
     where: { idstage: stageId, del: 0 },
-    include: [{ model: Direction, as: 'direction', required: false }],
+    include: [
+      { model: Direction, as: 'direction', required: false },
+      { model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom'] },
+    ],
   });
 
   if (!stage) {
@@ -1992,7 +2000,10 @@ const autoriserRenouvellementStage = async (stageId, agentId) => {
     });
   }
 
-  return autorisation;
+  // Le candidat est joint pour permettre au contrôleur d'enrichir le journal
+  // d'audit (qui/quoi), sans changer la forme des champs déjà utilisés par le
+  // frontend (id, expiresAt, etc.).
+  return { ...autorisation.toJSON(), candidat: stage.candidat };
 };
 
 /**

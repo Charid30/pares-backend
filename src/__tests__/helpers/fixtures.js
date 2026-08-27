@@ -1,6 +1,6 @@
 // src/__tests__/helpers/fixtures.js
 // Fixtures partagées entre les tests d'intégration de services.
-const { Role, User, Candidat } = require('../../models');
+const { Role, User, Candidat, Direction } = require('../../models');
 
 // Candidat.users_idusers est une vraie clé étrangère vers users (et users.role_idrole
 // vers role) — SQLite applique les contraintes FK, donc il faut créer la chaîne complète.
@@ -21,4 +21,12 @@ const creerCandidat = async (overrides = {}) => {
   });
 };
 
-module.exports = { creerCandidat };
+const creerDirection = async (overrides = {}) => {
+  return Direction.create({
+    nom: `Direction Test ${Date.now()}-${Math.random()}`,
+    accronyme: `DT${Math.floor(Math.random() * 100000)}`,
+    ...overrides,
+  });
+};
+
+module.exports = { creerCandidat, creerDirection };

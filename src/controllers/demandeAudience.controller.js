@@ -129,7 +129,7 @@ const updateStatut = async (req, res) => {
       action:   status === 'ACCEPTE' ? 'AUDIENCE_ACCEPTEE' : 'AUDIENCE_REJETEE',
       module:   'AUDIENCE',
       entityId: demandeId,
-      details:  { status, commentaireAdmin: commentaireAdmin || null, dateAudienceConfirmee: dateAudienceConfirmee || null, heureAudienceConfirmee: heureAudienceConfirmee || null },
+      details:  { objet: "Demande d'audience", nom: demande.candidat?.nom || null, prenom: demande.candidat?.prenom || null, status, commentaireAdmin: commentaireAdmin || null, dateAudienceConfirmee: dateAudienceConfirmee || null, heureAudienceConfirmee: heureAudienceConfirmee || null },
       ip: req.ip,
     });
 
@@ -178,7 +178,7 @@ const updateDemande = async (req, res) => {
       action:   'AUDIENCE_AFFECTATION',
       module:   'AUDIENCE',
       entityId: demandeId,
-      details:  { direction_iddirection: req.body.direction_iddirection ?? null },
+      details:  { objet: "Demande d'audience", nom: demande.candidat?.nom || null, prenom: demande.candidat?.prenom || null, direction_iddirection: req.body.direction_iddirection ?? null },
       ip: req.ip,
     });
 
@@ -333,7 +333,7 @@ const transfererDemande = async (req, res) => {
       action:   'AUDIENCE_TRANSFEREE',
       module:   'AUDIENCE',
       entityId: demandeId,
-      details:  { direction_iddirection },
+      details:  { objet: "Demande d'audience", nom: demande.candidat?.nom || null, prenom: demande.candidat?.prenom || null, direction_iddirection },
       ip: req.ip,
     });
     return success(res, demande, 'Demande transférée avec succès');
