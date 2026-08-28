@@ -67,9 +67,9 @@ const createAideByAdmin = async (req, res) => {
  */
 const getAllAides = async (req, res) => {
   try {
-    // Un agent (agentId présent) est toujours limité à sa direction.
-    // Seul un admin (pas d'agentId) peut avoir un accès global.
-    const globalAccess = !req.user.agentId && await hasGlobalReadAccess(req.user);
+    // ADMIN → accès global. Agent → toujours filtré par sa direction (lectureGlobale ignoré).
+    const roles = getUserRoles(req.user);
+    const globalAccess = roles.includes('ADMIN');
     const directionId = globalAccess ? null : await resolveAgentDirection(req.user.agentId);
     const aides = await aideService.getAllAides(req.query, directionId);
     return success(res, aides, 'Aides récupérées avec succès');

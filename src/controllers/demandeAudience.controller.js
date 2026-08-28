@@ -94,9 +94,9 @@ const annulerDemande = async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 const getAllDemandes = async (req, res) => {
   try {
-    // Un agent (agentId présent) est toujours limité à sa direction.
-    // Seul un admin (pas d'agentId) peut avoir un accès global.
-    const globalAccess = !req.user.agentId && await hasGlobalReadAccess(req.user);
+    // ADMIN → accès global. Agent → toujours filtré par sa direction (lectureGlobale ignoré).
+    const roles = getUserRoles(req.user);
+    const globalAccess = roles.includes('ADMIN');
     const directionId = globalAccess ? null : await resolveAgentDirection(req.user.agentId);
     const result = await demandeAudienceService.getAllDemandes(req.query, directionId);
     return res.status(200).json({
