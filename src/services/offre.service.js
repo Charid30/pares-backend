@@ -281,17 +281,26 @@ const evaluateOffre = async (id, data) => {
   // Notification au candidat — en arrière-plan
   (async () => {
     try {
-      if (offre.candidatCreateur && (data.statusOffre === 'VALIDEE' || data.statusOffre === 'REJETEE')) {
-        const frontUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+      if (!offre.candidatCreateur) return;
+      const frontUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+      const urlSuivi = `${frontUrl}/dashboard/candidat/mes-offres`;
+
+      if (data.statusOffre === 'VALIDEE' || data.statusOffre === 'REJETEE') {
         await notifService.sendDecisionEmail(
           offre.candidatCreateur, 'offre', data.statusOffre,
           [{ label: 'Titre', value: offre.titre }, { label: 'Type', value: offre.typeOffre }],
-          `${frontUrl}/dashboard/candidat/mes-offres`,
-          data.motifRefus || null
+          urlSuivi, data.motifRefus || null
+        );
+      }
+      if (data.statusOffre === 'VALIDEE' && data.dateEntretien) {
+        const dateFormatee = new Date(data.dateEntretien).toLocaleDateString('fr-FR');
+        await notifService.sendDateRdvEmail(
+          offre.candidatCreateur, 'offre',
+          dateFormatee, data.heureEntretien || null, urlSuivi
         );
       }
     } catch (e) {
-      console.error('❌ Email décision offre:', e.message);
+      console.error('❌ Notif offre:', e.message);
     }
   })();
 

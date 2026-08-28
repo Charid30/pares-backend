@@ -66,6 +66,24 @@ module.exports = (sequelize) => {
       defaultValue: null,
       comment: 'Direction SONABHY à laquelle la demande est affectée (admin)',
     },
+    transfereParId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'ID de l\'agent ayant transféré la demande vers cette direction',
+    },
+    transferePar: {
+      type: DataTypes.STRING(150),
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Nom de l\'agent ayant transféré la demande (snapshot)',
+    },
+    transfereDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Date du dernier transfert de direction',
+    },
 
     // ── Commun aux deux modes ─────────────────────────────────
     dateAudience: {

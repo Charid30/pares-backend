@@ -169,6 +169,18 @@ router.put(
 );
 
 /**
+ * @route   PUT /api/aides/:id/transferer
+ * @desc    Transférer une aide vers une autre direction
+ * @access  Private (permission AIDE MODIFIER)
+ */
+router.put(
+  '/:id/transferer',
+  authenticate,
+  authorizeAction('AIDE', 'MODIFIER'),
+  aideController.transfererAide
+);
+
+/**
  * @route   DELETE /api/aides/:id
  * @desc    Supprimer une aide
  * @access  Private (ADMIN)

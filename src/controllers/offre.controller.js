@@ -67,7 +67,9 @@ const createOffreByAdmin = async (req, res) => {
  */
 const getAllOffres = async (req, res) => {
   try {
-    const globalAccess = await hasGlobalReadAccess(req.user);
+    // Un agent (agentId présent) est toujours limité à sa direction.
+    // Seul un admin (pas d'agentId) peut avoir un accès global.
+    const globalAccess = !req.user.agentId && await hasGlobalReadAccess(req.user);
     const directionId = globalAccess ? null : await resolveAgentDirection(req.user.agentId);
     const offres = await offreService.getAllOffres(req.query, directionId);
     return success(res, offres, 'Offres récupérées avec succès');

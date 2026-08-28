@@ -60,7 +60,11 @@ const saveFile = (buffer, originalname, subfolder) => {
  */
 const readFile = (relPath, blobData) => {
   if (relPath) {
-    const absPath = path.join(__dirname, '..', '..', relPath);
+    const absPath = path.resolve(__dirname, '..', '..', relPath);
+    // Confinement : rejeter tout chemin qui sortirait du dossier uploads
+    if (!absPath.startsWith(UPLOADS_ROOT + path.sep) && !absPath.startsWith(UPLOADS_ROOT + '/')) {
+      throw new Error(`Accès refusé : chemin hors du dossier uploads — ${relPath}`);
+    }
     if (fs.existsSync(absPath)) {
       return fs.readFileSync(absPath);
     }

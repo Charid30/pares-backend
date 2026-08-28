@@ -80,7 +80,11 @@ const getLogsForIp = async (ip) => {
     order: [['createdAt', 'DESC']],
     limit: 100,
   });
-  return logs;
+  return logs.map((log) => {
+    const json = log.toJSON();
+    json.geo = locateIp(json.ip_address);
+    return json;
+  });
 };
 
 /**

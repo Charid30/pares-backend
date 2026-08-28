@@ -5,6 +5,7 @@ const {
   CandidatureAide,
   Candidat,
   Agent,
+  Direction,
   User,
 } = require('../models');
 const { Op } = require('sequelize');
@@ -112,21 +113,15 @@ const createAideByAdmin = async (userId, data) => {
 /**
  * Obtenir toutes les aides
  */
-const getAllAides = async (filters = {}) => {
+const getAllAides = async (filters = {}, directionId = null) => {
   const where = { del: 0 };
-  
-  if (filters.creePar) {
-    where.creePar = filters.creePar;
-  }
-  
-  if (filters.statusAide) {
-    where.statusAide = filters.statusAide;
-  }
-  
-  if (filters.typeAide) {
-    where.typeAide = filters.typeAide;
-  }
-  
+
+  if (filters.creePar)    where.creePar    = filters.creePar;
+  if (filters.statusAide) where.statusAide = filters.statusAide;
+  if (filters.typeAide)   where.typeAide   = filters.typeAide;
+  // Filtre direction — appliqué si l'appelant est un agent (non-admin)
+  if (directionId)        where.direction_iddirection = directionId;
+
   return await Aide.findAll({
     where,
     include: [
@@ -142,8 +137,41 @@ const getAllAides = async (filters = {}) => {
         attributes: ['idagents', 'nom', 'prenom', 'matricule'],
         required: false,
       },
+      {
+        model: Direction,
+        as: 'direction',
+        attributes: ['iddirection', 'nom', 'accronyme'],
+        required: false,
+      },
     ],
     order: [['createdDate', 'DESC']],
+  });
+};
+
+const transfererAide = async (aideId, newDirectionId, agentId = null, agentNom = null) => {
+  const aide = await Aide.findOne({ where: { idaide: aideId, del: 0 } });
+  if (!aide) throw new Error('Aide introuvable');
+
+  if (aide.direction_iddirection === newDirectionId) {
+    throw new Error('Cette aide est déjà affectée à cette direction');
+  }
+
+  const direction = await Direction.findOne({ where: { iddirection: newDirectionId, del: 0 } });
+  if (!direction) throw new Error('Direction non trouvée');
+
+  await aide.update({
+    direction_iddirection: newDirectionId,
+    lastModifiedDate: new Date(),
+    transfereParId: agentId ?? null,
+    transferePar: agentNom ?? null,
+    transfereDate: new Date(),
+  });
+
+  return aide.reload({
+    include: [
+      { model: Candidat, as: 'candidatCreateur', attributes: ['idcandidats', 'nom', 'prenom', 'email', 'ifu'] },
+      { model: Direction, as: 'direction', attributes: ['iddirection', 'nom', 'accronyme'], required: false },
+    ],
   });
 };
 
@@ -270,17 +298,26 @@ const evaluateAide = async (id, data) => {
   // Notification au candidat — en arrière-plan
   (async () => {
     try {
-      if (aide.candidatCreateur && (data.statusAide === 'VALIDEE' || data.statusAide === 'REJETEE')) {
-        const frontUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+      if (!aide.candidatCreateur) return;
+      const frontUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+      const urlSuivi = `${frontUrl}/dashboard/candidat/mes-aides`;
+
+      if (data.statusAide === 'VALIDEE' || data.statusAide === 'REJETEE') {
         await notifService.sendDecisionEmail(
-          aide.candidatCreateur, 'aide', data.statusAide,
+          aide.candidatCreateur, 'aide sociale', data.statusAide,
           [{ label: 'Titre', value: aide.titre }, { label: 'Type', value: aide.typeAide }],
-          `${frontUrl}/dashboard/candidat/mes-aides`,
-          data.motifRefus || null
+          urlSuivi, data.motifRefus || null
+        );
+      }
+      if (data.statusAide === 'VALIDEE' && data.dateTraitement) {
+        const dateFormatee = new Date(data.dateTraitement).toLocaleDateString('fr-FR');
+        await notifService.sendDateRdvEmail(
+          aide.candidatCreateur, 'aide sociale',
+          dateFormatee, data.heureTraitement || null, urlSuivi
         );
       }
     } catch (e) {
-      console.error('❌ Email décision aide:', e.message);
+      console.error('❌ Notif aide:', e.message);
     }
   })();
 
@@ -472,6 +509,7 @@ module.exports = {
   updateAide,
   evaluateAide,
   deleteAide,
+  transfererAide,
   
   // Candidatures
   createCandidatureAide,

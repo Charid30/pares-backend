@@ -94,7 +94,9 @@ const annulerDemande = async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 const getAllDemandes = async (req, res) => {
   try {
-    const globalAccess = await hasGlobalReadAccess(req.user);
+    // Un agent (agentId présent) est toujours limité à sa direction.
+    // Seul un admin (pas d'agentId) peut avoir un accès global.
+    const globalAccess = !req.user.agentId && await hasGlobalReadAccess(req.user);
     const directionId = globalAccess ? null : await resolveAgentDirection(req.user.agentId);
     const result = await demandeAudienceService.getAllDemandes(req.query, directionId);
     return res.status(200).json({
@@ -326,7 +328,12 @@ const transfererDemande = async (req, res) => {
     const demandeId = parseInt(req.params.id);
     const { direction_iddirection } = req.body;
     if (!direction_iddirection) return error(res, 'La direction cible est requise', 400);
-    const demande = await demandeAudienceService.transfererDemande(demandeId, direction_iddirection);
+    const demande = await demandeAudienceService.transfererDemande(
+      demandeId,
+      direction_iddirection,
+      req.user?.agentId ?? null,
+      req.user?.username ?? null,
+    );
     await auditService.log({
       agentId:  req.user?.agentId,
       agentNom: req.user?.username,

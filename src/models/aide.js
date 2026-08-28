@@ -91,6 +91,42 @@ module.exports = (sequelize) => {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
     },
+    // ── Affectation administrative ────────────────────────────
+    direction_iddirection: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Direction SONABHY à laquelle l\'aide est affectée',
+    },
+    transfereParId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'ID de l\'agent ayant transféré l\'aide vers cette direction',
+    },
+    transferePar: {
+      type: DataTypes.STRING(150),
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Nom de l\'agent ayant transféré l\'aide (snapshot)',
+    },
+    transfereDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Date du dernier transfert de direction',
+    },
+    dateTraitement: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Date du rendez-vous de traitement fixée par l\'administration',
+    },
+    heureTraitement: {
+      type: DataTypes.TIME,
+      allowNull: true,
+      defaultValue: null,
+    },
     del: {
       type: DataTypes.TINYINT,
       defaultValue: 0,

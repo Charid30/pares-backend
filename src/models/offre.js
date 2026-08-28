@@ -95,6 +95,16 @@ module.exports = (sequelize) => {
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    dateEntretien: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+      defaultValue: null,
+    },
+    heureEntretien: {
+      type: DataTypes.TIME,
+      allowNull: true,
+      defaultValue: null,
+    },
     del: {
       type: DataTypes.TINYINT,
       defaultValue: 0,

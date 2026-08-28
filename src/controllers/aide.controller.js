@@ -3,6 +3,29 @@ const aideService = require('../services/aide.service');
 const { success, error } = require('../utils/response.util');
 const auditService = require('../services/audit.service');
 const fileStorage = require('../utils/fileStorage.util');
+const { Agent, Role, Permission } = require('../models');
+const { Op } = require('sequelize');
+
+const getUserRoles = (user) =>
+  (Array.isArray(user.roles) && user.roles.length) ? user.roles : (user.role ? [user.role] : []);
+
+const hasGlobalReadAccess = async (user) => {
+  const roles = getUserRoles(user);
+  if (roles.includes('ADMIN')) return true;
+  const roleIds = Array.isArray(user.roleIds) ? user.roleIds : (user.roleId ? [user.roleId] : []);
+  if (!roleIds.length) return false;
+  const count = await Role.count({
+    where: { idrole: { [Op.in]: roleIds }, lectureGlobale: true, del: 0 },
+    include: [{ model: Permission, as: 'permissions', where: { module: 'AIDE', action: 'CONSULTER', del: 0 }, required: true }],
+  });
+  return count > 0;
+};
+
+const resolveAgentDirection = async (agentId) => {
+  if (!agentId) return null;
+  const agent = await Agent.findOne({ where: { idagents: agentId, del: 0 }, attributes: ['direction_iddirection'] });
+  return agent?.direction_iddirection ?? null;
+};
 
 // =====================================================
 // AIDES
@@ -44,10 +67,45 @@ const createAideByAdmin = async (req, res) => {
  */
 const getAllAides = async (req, res) => {
   try {
-    const aides = await aideService.getAllAides(req.query);
+    // Un agent (agentId présent) est toujours limité à sa direction.
+    // Seul un admin (pas d'agentId) peut avoir un accès global.
+    const globalAccess = !req.user.agentId && await hasGlobalReadAccess(req.user);
+    const directionId = globalAccess ? null : await resolveAgentDirection(req.user.agentId);
+    const aides = await aideService.getAllAides(req.query, directionId);
     return success(res, aides, 'Aides récupérées avec succès');
   } catch (err) {
     return error(res, err.message, 500);
+  }
+};
+
+const transfererAide = async (req, res) => {
+  try {
+    const aideId = parseInt(req.params.id);
+    const { direction_iddirection } = req.body;
+    if (!direction_iddirection) return error(res, 'La direction cible est requise', 400);
+    const aide = await aideService.transfererAide(
+      aideId,
+      direction_iddirection,
+      req.user?.agentId ?? null,
+      req.user?.username ?? null,
+    );
+    await auditService.log({
+      agentId:  req.user?.agentId,
+      agentNom: req.user?.username,
+      action:   'AIDE_TRANSFEREE',
+      module:   'AIDE',
+      entityId: aideId,
+      details:  {
+        objet:  `Aide — ${aide.titre || aide.typeAide || ''}`,
+        nom:    aide.candidatCreateur?.nom    || null,
+        prenom: aide.candidatCreateur?.prenom || null,
+        direction_iddirection,
+      },
+      ip: req.ip,
+    });
+    return success(res, aide, 'Aide transférée avec succès');
+  } catch (err) {
+    return error(res, err.message, 400);
   }
 };
 
@@ -375,6 +433,7 @@ module.exports = {
   exportAidesPDF,
   deleteAide,
   getFichierAide,
+  transfererAide,
 
   // Candidatures
   createCandidatureAide,

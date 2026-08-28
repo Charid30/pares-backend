@@ -459,6 +459,10 @@ Aide.belongsTo(Agent, {
   as: 'agentCreateur',
 });
 
+// Direction ↔ Aide (1:N) - affectation administrative
+Direction.hasMany(Aide, { foreignKey: 'direction_iddirection', as: 'aidesDirection' });
+Aide.belongsTo(Direction, { foreignKey: 'direction_iddirection', as: 'direction' });
+
 // Aide ↔ CandidatureAide (1:N)
 Aide.hasMany(CandidatureAide, {
   foreignKey: 'aides_idaide',

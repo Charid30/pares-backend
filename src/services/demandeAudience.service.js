@@ -230,22 +230,32 @@ const updateStatut = async (demandeId, status, commentaireAdmin = null, dateAudi
   (async () => {
     try {
       const candidat = await Candidat.findOne({ where: { idcandidats: demande.candidats_idcandidats, del: 0 } });
-      if (candidat && (status === 'ACCEPTE' || status === 'REJETE')) {
+      if (candidat) {
         const frontUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+        const urlSuivi = `${frontUrl}/dashboard/candidat/mes-audiences`;
         const dateFinale = demande.dateAudienceConfirmee || demande.dateAudience;
         const heureFinale = demande.heureAudienceConfirmee || demande.heureAudience;
-        await notifService.sendDecisionEmail(
-          candidat, 'audience', status,
-          [
-            { label: 'Date audience', value: new Date(dateFinale).toLocaleDateString('fr-FR') },
-            { label: 'Heure', value: heureFinale },
-          ],
-          `${frontUrl}/dashboard/candidat/mes-audiences`,
-          commentaireAdmin || null
-        );
+
+        if (status === 'ACCEPTE' || status === 'REJETE') {
+          await notifService.sendDecisionEmail(
+            candidat, 'audience', status,
+            [
+              { label: 'Date audience', value: dateFinale ? new Date(dateFinale).toLocaleDateString('fr-FR') : '—' },
+              { label: 'Heure', value: heureFinale || '—' },
+            ],
+            urlSuivi, commentaireAdmin || null
+          );
+        }
+        if (status === 'ACCEPTE' && dateFinale) {
+          await notifService.sendDateRdvEmail(
+            candidat, 'audience',
+            new Date(dateFinale).toLocaleDateString('fr-FR'),
+            heureFinale || null, urlSuivi
+          );
+        }
       }
     } catch (e) {
-      console.error('❌ Email décision audience:', e.message);
+      console.error('❌ Notif audience:', e.message);
     }
   })();
 
@@ -304,7 +314,7 @@ const getFichierDemande = async (demandeId) => {
 // ─────────────────────────────────────────────────────────────
 // TRANSFÉRER UNE DEMANDE VERS UNE AUTRE DIRECTION
 // ─────────────────────────────────────────────────────────────
-const transfererDemande = async (demandeId, newDirectionId) => {
+const transfererDemande = async (demandeId, newDirectionId, agentId = null, agentNom = null) => {
   const demande = await DemandeAudience.findOne({ where: { iddemande: demandeId, del: 0 } });
   if (!demande) throw new Error('Demande introuvable');
 
@@ -319,7 +329,13 @@ const transfererDemande = async (demandeId, newDirectionId) => {
   const direction = await Direction.findOne({ where: { iddirection: newDirectionId, del: 0 } });
   if (!direction) throw new Error('Direction non trouvée');
 
-  await demande.update({ direction_iddirection: newDirectionId, lastModifiedDate: new Date() });
+  await demande.update({
+    direction_iddirection: newDirectionId,
+    lastModifiedDate: new Date(),
+    transfereParId: agentId ?? null,
+    transferePar: agentNom ?? null,
+    transfereDate: new Date(),
+  });
   return demande.reload({
     include: [
       { model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom', 'telephone', 'email'] },

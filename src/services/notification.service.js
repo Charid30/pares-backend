@@ -253,6 +253,66 @@ const sendDocumentARemplacerStage = async (candidat, stage, documentsLabels, url
 };
 
 // =====================================================
+// TEMPLATE — Date RDV fixée (audience / offre / aide)
+// =====================================================
+
+/**
+ * Notifie un candidat qu'une date de rendez-vous a été fixée.
+ * Envoie email + in-app + push.
+ * @param {object} candidat  - { idcandidats, prenom, nom, email }
+ * @param {string} module    - 'audience' | 'offre' | 'aide sociale'
+ * @param {string} date      - ex. '15/09/2026'
+ * @param {string} heure     - ex. '09:00' (peut être null)
+ * @param {string} urlSuivi  - lien de la demande côté candidat
+ */
+const sendDateRdvEmail = async (candidat, module, date, heure, urlSuivi) => {
+  const pushService = require('./push.service');
+  const heureStr = heure ? ` à ${heure}` : '';
+  const dateLabel = `${date}${heureStr}`;
+
+  const html = emailService.buildBaseTemplate(`
+    <p class="greeting">Bonjour ${candidat.prenom} ${candidat.nom},</p>
+    <p class="message">
+      Nous avons le plaisir de vous informer qu'une date de rendez-vous a été fixée pour votre demande de <strong>${module}</strong>.
+    </p>
+    <span class="status-badge status-success">📅 Rendez-vous confirmé</span>
+    <div class="info-box">
+      <p><strong>Date :</strong> ${date}</p>
+      ${heure ? `<p><strong>Heure :</strong> ${heure}</p>` : ''}
+      <p style="margin-top:8px; color:#666; font-size:13px;">Veuillez vous présenter à l'heure indiquée avec vos documents.</p>
+    </div>
+    <div style="text-align:center;">
+      <a href="${urlSuivi}" class="button">Voir ma demande</a>
+    </div>
+  `, `Rendez-vous — ${module}`);
+
+  await emailService.sendEmail({
+    to: candidat.email,
+    subject: `Rendez-vous fixé pour votre demande de ${module} — ${dateLabel}`,
+    html,
+  });
+
+  if (candidat.idcandidats) {
+    await inapp.push({
+      recipientType: 'CANDIDAT',
+      recipientId: candidat.idcandidats,
+      type: `RDV_${module.toUpperCase().replace(/ /g, '_')}`,
+      titre: `Rendez-vous — ${module}`,
+      message: `Votre rendez-vous est fixé au ${dateLabel}.`,
+      link: urlSuivi,
+    });
+
+    await pushService.sendPushToUser({
+      recipientType: 'CANDIDAT',
+      recipientId: candidat.idcandidats,
+      titre: `Rendez-vous — ${module}`,
+      message: `Votre rendez-vous est fixé au ${dateLabel}. Présentez-vous à l'heure.`,
+      link: urlSuivi,
+    });
+  }
+};
+
+// =====================================================
 // FONCTIONS MÉTIER PAR MODULE
 // =====================================================
 
@@ -463,6 +523,7 @@ module.exports = {
   initAgentNotificationPrefs,
   sendConfirmationSoumission,
   sendDecisionEmail,
+  sendDateRdvEmail,
   sendDocumentARemplacerStage,
   onNouvelleDemandeStage,
   onNouvelleDemandeOffre,
