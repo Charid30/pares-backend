@@ -1,6 +1,7 @@
 // src/services/demandeAudience.service.js
 const fileStorage = require('../utils/fileStorage.util');
 const { DemandeAudience, Candidat, Direction } = require('../models');
+const { Op } = require('sequelize');
 const notifService = require('./notification.service');
 
 // ─────────────────────────────────────────────────────────────
@@ -149,15 +150,16 @@ const annulerDemandeByCandidat = async (candidatId, demandeId) => {
 // ─────────────────────────────────────────────────────────────
 // LISTER TOUTES LES DEMANDES (admin / agents)
 // ─────────────────────────────────────────────────────────────
-const getAllDemandes = async (options = {}, directionId = null) => {
+const getAllDemandes = async (options = {}, directionIds = null) => {
   const page = Math.max(1, parseInt(options.page) || 1);
   const limit = Math.min(50, Math.max(1, parseInt(options.limit) || 10));
   const offset = (page - 1) * limit;
 
   const where = { del: 0 };
   if (options.status) where.status = options.status;
-  // Si un filtre de direction est fourni, restreindre à cette direction
-  if (directionId) where.direction_iddirection = directionId;
+  // Restreindre aux directions de l'agent si pas d'accès global
+  if (directionIds && directionIds.length > 0)
+    where.direction_iddirection = { [Op.in]: directionIds };
 
   const { count, rows } = await DemandeAudience.findAndCountAll({
     where,

@@ -47,7 +47,7 @@ const createAgentSchema = Joi.object({
       'any.required': "L'adresse email est requise",
     }),
 
-  // Rattachement : soit un service, soit une direction (jamais les deux, voir .xor ci-dessous)
+  // Rattachement : soit un service, soit des directions (jamais les deux)
   service_idservice: Joi.number()
     .integer()
     .min(1)
@@ -56,12 +56,22 @@ const createAgentSchema = Joi.object({
       'number.min':   'Veuillez sélectionner un service valide',
     }),
 
+  // direction unique (legacy)
   direction_iddirection: Joi.number()
     .integer()
     .min(1)
     .messages({
       'number.base':  'La direction doit être un nombre valide',
       'number.min':   'Veuillez sélectionner une direction valide',
+    }),
+
+  // directions multiples (nouveau — prioritaire sur direction_iddirection)
+  direction_ids: Joi.array()
+    .items(Joi.number().integer().min(1))
+    .min(1)
+    .messages({
+      'array.min':   'Veuillez sélectionner au moins une direction',
+      'number.base': 'Identifiant de direction invalide',
     }),
 
   // Compte utilisateur
@@ -115,10 +125,8 @@ const createAgentSchema = Joi.object({
     }),
 })
   .or('roleIds', 'role_idrole')
-  .xor('service_idservice', 'direction_iddirection')
   .messages({
     'object.missing': 'Veuillez sélectionner au moins un rôle',
-    'object.xor': 'Choisissez soit un service, soit une direction',
   });
 
 /**
@@ -175,6 +183,14 @@ const updateAgentSchema = Joi.object({
       'number.min':  'Veuillez sélectionner une direction valide',
     }),
 
+  direction_ids: Joi.array()
+    .items(Joi.number().integer().min(1))
+    .min(1)
+    .messages({
+      'array.min':   'Veuillez sélectionner au moins une direction',
+      'number.base': 'Identifiant de direction invalide',
+    }),
+
   // Rôles (optionnels en update). Si fournis, remplacent l'ensemble.
   roleIds: Joi.array()
     .items(Joi.number().integer().min(1))
@@ -191,11 +207,10 @@ const updateAgentSchema = Joi.object({
       'number.base': 'Le rôle doit être un nombre valide',
       'number.min':  'Veuillez sélectionner un rôle valide',
     }),
+
+  actif: Joi.boolean(),
 })
-  .nand('service_idservice', 'direction_iddirection')
-  .messages({
-    'object.nand': 'Choisissez soit un service, soit une direction, pas les deux',
-  });
+  .messages({});
 
 /**
  * Schéma de validation pour le changement de mot de passe

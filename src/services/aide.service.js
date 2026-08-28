@@ -113,14 +113,15 @@ const createAideByAdmin = async (userId, data) => {
 /**
  * Obtenir toutes les aides
  */
-const getAllAides = async (filters = {}, directionId = null) => {
+const getAllAides = async (filters = {}, directionIds = null) => {
   const where = { del: 0 };
 
   if (filters.creePar)    where.creePar    = filters.creePar;
   if (filters.statusAide) where.statusAide = filters.statusAide;
   if (filters.typeAide)   where.typeAide   = filters.typeAide;
   // Filtre direction — appliqué si l'appelant est un agent (non-admin)
-  if (directionId)        where.direction_iddirection = directionId;
+  if (directionIds && directionIds.length > 0)
+    where.direction_iddirection = { [Op.in]: directionIds };
 
   return await Aide.findAll({
     where,

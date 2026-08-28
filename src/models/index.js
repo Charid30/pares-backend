@@ -76,6 +76,10 @@ if (!isTestEnv) ApiKey.sync({ force: false }).catch(e => console.error('ApiKey s
 // Créer la table notifications si elle n'existe pas
 if (!isTestEnv) Notification.sync({ force: false }).catch(e => console.error('Notification sync:', e.message));
 
+// Table de jointure agents ↔ directions (N:M — plusieurs directions par agent)
+const AgentDirection = require('./AgentDirection')(sequelize);
+if (!isTestEnv) AgentDirection.sync({ force: false }).catch(e => console.error('AgentDirection sync:', e.message));
+
 // Abonnements Web Push (notifications navigateur)
 const PushSubscription = require('./PushSubscription')(sequelize);
 if (!isTestEnv) PushSubscription.sync({ force: false }).catch(e => console.error('PushSubscription sync:', e.message));
@@ -171,7 +175,7 @@ Agent.belongsTo(Service, {
   as: 'service',
 });
 
-// Direction ↔ Agent (1:N) — rattachement direct, pour les agents sans service
+// Direction ↔ Agent (1:N) — rattachement direct (legacy), pour les agents sans service
 Direction.hasMany(Agent, {
   foreignKey: 'direction_iddirection',
   as: 'agentsDirects',
@@ -179,6 +183,20 @@ Direction.hasMany(Agent, {
 Agent.belongsTo(Direction, {
   foreignKey: 'direction_iddirection',
   as: 'directionDirecte',
+});
+
+// Agent ↔ Direction (N:M) via agents_directions — multi-directions
+Agent.belongsToMany(Direction, {
+  through: AgentDirection,
+  foreignKey: 'agent_idagents',
+  otherKey: 'direction_iddirection',
+  as: 'directions',
+});
+Direction.belongsToMany(Agent, {
+  through: AgentDirection,
+  foreignKey: 'direction_iddirection',
+  otherKey: 'agent_idagents',
+  as: 'agentsMulti',
 });
 
 // User ↔ Agent (N:M) via users_agents
@@ -545,4 +563,7 @@ module.exports = {
 
   // Email
   EmailQueue,
+
+  // Junction: agent ↔ directions (multi-directions)
+  AgentDirection,
 };

@@ -123,14 +123,15 @@ const createOffreByAdmin = async (userId, data) => {
 /**
  * Obtenir toutes les offres
  */
-const getAllOffres = async (filters = {}, directionId = null) => {
+const getAllOffres = async (filters = {}, directionIds = null) => {
   const where = { del: 0 };
 
   if (filters.creePar) where.creePar = filters.creePar;
   if (filters.statusOffre) where.statusOffre = filters.statusOffre;
   if (filters.typeOffre) where.typeOffre = filters.typeOffre;
-  // Restreindre à la direction de l'agent si pas d'accès global
-  if (directionId) where.direction_iddirection = directionId;
+  // Restreindre aux directions de l'agent si pas d'accès global
+  if (directionIds && directionIds.length > 0)
+    where.direction_iddirection = { [Op.in]: directionIds };
   
   return await Offre.findAll({
     where,

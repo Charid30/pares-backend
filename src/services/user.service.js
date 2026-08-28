@@ -1,5 +1,5 @@
 // src/services/user.service.js - Service de gestion des utilisateurs et agents
-const { User, Agent, Role, Service, Direction, UserAgent, UserRole, sequelize } = require('../models');
+const { User, Agent, AgentDirection, Role, Service, Direction, UserAgent, UserRole, sequelize } = require('../models');
 const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
 const notifService = require('./notification.service');
@@ -102,6 +102,12 @@ const getAllAgents = async (filters = {}) => {
         attributes: ['iddirection', 'nom', 'accronyme'],
       },
       {
+        model: Direction,
+        as: 'directions',
+        attributes: ['iddirection', 'nom', 'accronyme'],
+        through: { attributes: [] },
+      },
+      {
         model: User,
         as: 'users',
         where: role ? { role_idrole: role } : userWhereClause,
@@ -155,6 +161,12 @@ const getAgentById = async (id) => {
         attributes: ['iddirection', 'nom', 'accronyme'],
       },
       {
+        model: Direction,
+        as: 'directions',
+        attributes: ['iddirection', 'nom', 'accronyme'],
+        through: { attributes: [] },
+      },
+      {
         model: User,
         as: 'users',
         where: { del: 0 },
@@ -190,8 +202,13 @@ const getAgentById = async (id) => {
 const createAgent = async (data, createdBy) => {
   const {
     nom, prenom, matricule, email,
-    service_idservice, direction_iddirection, username, password
+    service_idservice, direction_iddirection, direction_ids, username, password
   } = data;
+
+  // Normaliser les directions : direction_ids (tableau, nouveau) ou direction_iddirection (legacy unique)
+  const directionIds = Array.isArray(direction_ids) && direction_ids.length > 0
+    ? direction_ids
+    : (direction_iddirection ? [direction_iddirection] : []);
 
   // Rôles : principal + additionnels
   const rolesInput = normalizeRoleInput(data);
@@ -226,12 +243,12 @@ const createAgent = async (data, createdBy) => {
       throw new Error('Ce nom d\'utilisateur est déjà utilisé');
     }
 
-    // Rattachement : soit un service, soit une direction (jamais les deux)
-    if (service_idservice && direction_iddirection) {
-      throw new Error('Choisissez soit un service, soit une direction, pas les deux');
+    // Rattachement : soit un service, soit des directions (jamais les deux)
+    if (service_idservice && directionIds.length > 0) {
+      throw new Error('Choisissez soit un service, soit des directions, pas les deux');
     }
-    if (!service_idservice && !direction_iddirection) {
-      throw new Error('Un service ou une direction doit être renseigné');
+    if (!service_idservice && directionIds.length === 0) {
+      throw new Error('Un service ou au moins une direction doit être renseigné');
     }
     if (service_idservice) {
       const serviceExists = await Service.findOne({
@@ -241,11 +258,9 @@ const createAgent = async (data, createdBy) => {
         throw new Error('Service non trouvé');
       }
     } else {
-      const directionExists = await Direction.findOne({
-        where: { iddirection: direction_iddirection, del: 0 }
-      });
-      if (!directionExists) {
-        throw new Error('Direction non trouvée');
+      const dirCount = await Direction.count({ where: { iddirection: { [Op.in]: directionIds }, del: 0 } });
+      if (dirCount !== directionIds.length) {
+        throw new Error('Une ou plusieurs directions sont introuvables');
       }
     }
 
@@ -257,17 +272,25 @@ const createAgent = async (data, createdBy) => {
       throw new Error('Un ou plusieurs rôles sont introuvables');
     }
 
-    // Créer l'agent
+    // Créer l'agent (direction_iddirection = première direction, pour backward compat)
     const agent = await Agent.create({
       nom,
       prenom,
       matricule,
       email,
       service_idservice: service_idservice || null,
-      direction_iddirection: direction_iddirection || null,
+      direction_iddirection: directionIds[0] || null,
       createdBy,
       createdDate: new Date(),
     }, { transaction });
+
+    // Enregistrer les directions dans la table de jointure
+    if (directionIds.length > 0) {
+      await AgentDirection.bulkCreate(
+        directionIds.map(did => ({ agent_idagents: agent.idagents, direction_iddirection: did })),
+        { transaction, ignoreDuplicates: true }
+      );
+    }
 
     // Créer l'utilisateur avec son rôle PRINCIPAL
     const user = await User.create({
@@ -313,7 +336,7 @@ const createAgent = async (data, createdBy) => {
 const updateAgent = async (id, data, modifiedBy) => {
   const {
     nom, prenom, matricule, email,
-    service_idservice, direction_iddirection
+    service_idservice, direction_iddirection, direction_ids, actif
   } = data;
 
   // Rôles (optionnels en update) : si fournis, on remplace l'ensemble
@@ -356,11 +379,26 @@ const updateAgent = async (id, data, modifiedBy) => {
       }
     }
 
-    // Rattachement : si l'un des deux champs est fourni, il remplace le rattachement
-    // existant en entier (un agent ne peut être lié qu'à un service OU une direction).
     let nextServiceId = agent.service_idservice;
     let nextDirectionId = agent.direction_iddirection;
-    if (service_idservice !== undefined || direction_iddirection !== undefined) {
+    let newDirectionIds = null; // null = pas de changement de direction
+
+    // Cas 1 : direction_ids (tableau, nouveau contrat) fourni
+    if (Array.isArray(direction_ids)) {
+      if (direction_ids.length === 0) {
+        throw new Error('Au moins une direction doit être renseignée');
+      }
+      if (service_idservice) {
+        throw new Error('Choisissez soit un service, soit des directions, pas les deux');
+      }
+      const dirCount = await Direction.count({ where: { iddirection: { [Op.in]: direction_ids }, del: 0 } });
+      if (dirCount !== direction_ids.length) throw new Error('Une ou plusieurs directions sont introuvables');
+      newDirectionIds = direction_ids;
+      nextDirectionId = direction_ids[0];
+      nextServiceId = null;
+    }
+    // Cas 2 : champs legacy fournis
+    else if (service_idservice !== undefined || direction_iddirection !== undefined) {
       if (service_idservice && direction_iddirection) {
         throw new Error('Choisissez soit un service, soit une direction, pas les deux');
       }
@@ -369,18 +407,20 @@ const updateAgent = async (id, data, modifiedBy) => {
         if (!serviceExists) throw new Error('Service non trouvé');
         nextServiceId = service_idservice;
         nextDirectionId = null;
+        newDirectionIds = []; // effacer les directions
       } else if (direction_iddirection) {
         const directionExists = await Direction.findOne({ where: { iddirection: direction_iddirection, del: 0 } });
         if (!directionExists) throw new Error('Direction non trouvée');
         nextDirectionId = direction_iddirection;
         nextServiceId = null;
+        newDirectionIds = [direction_iddirection];
       } else {
         throw new Error('Un service ou une direction doit être renseigné');
       }
     }
 
     // Mettre à jour l'agent
-    await agent.update({
+    const agentUpdate = {
       nom: nom || agent.nom,
       prenom: prenom || agent.prenom,
       matricule: matricule || agent.matricule,
@@ -389,7 +429,20 @@ const updateAgent = async (id, data, modifiedBy) => {
       direction_iddirection: nextDirectionId,
       lastModifiedBy: modifiedBy,
       lastModifiedDate: new Date(),
-    }, { transaction });
+    };
+    if (actif !== undefined) agentUpdate.actif = actif;
+    await agent.update(agentUpdate, { transaction });
+
+    // Synchroniser la table de jointure si les directions ont changé
+    if (newDirectionIds !== null) {
+      await AgentDirection.destroy({ where: { agent_idagents: id }, transaction });
+      if (newDirectionIds.length > 0) {
+        await AgentDirection.bulkCreate(
+          newDirectionIds.map(did => ({ agent_idagents: id, direction_iddirection: did })),
+          { transaction, ignoreDuplicates: true }
+        );
+      }
+    }
 
     // Mettre à jour les rôles de l'utilisateur si spécifiés
     if (rolesInput && agent.users && agent.users.length > 0) {

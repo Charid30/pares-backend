@@ -1,7 +1,7 @@
 // src/controllers/demandeAudience.controller.js
 const demandeAudienceService = require('../services/demandeAudience.service');
 const auditService = require('../services/audit.service');
-const { Agent, Role, Permission } = require('../models');
+const { Agent, AgentDirection, Role, Permission } = require('../models');
 const { Op } = require('sequelize');
 
 const getUserRoles = (user) =>
@@ -20,11 +20,13 @@ const hasGlobalReadAccess = async (user) => {
   return count > 0;
 };
 
-// Retourne la direction de l'agent connecté (null si introuvable)
+// Retourne le tableau des directions de l'agent ([] = aucune restriction)
 const resolveAgentDirection = async (agentId) => {
-  if (!agentId) return null;
+  if (!agentId) return [];
+  const rows = await AgentDirection.findAll({ where: { agent_idagents: agentId }, attributes: ['direction_iddirection'] });
+  if (rows.length > 0) return rows.map(r => r.direction_iddirection);
   const agent = await Agent.findOne({ where: { idagents: agentId, del: 0 }, attributes: ['direction_iddirection'] });
-  return agent?.direction_iddirection ?? null;
+  return agent?.direction_iddirection ? [agent.direction_iddirection] : [];
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -97,8 +99,8 @@ const getAllDemandes = async (req, res) => {
     // ADMIN → accès global. Agent → toujours filtré par sa direction (lectureGlobale ignoré).
     const roles = getUserRoles(req.user);
     const globalAccess = roles.includes('ADMIN');
-    const directionId = globalAccess ? null : await resolveAgentDirection(req.user.agentId);
-    const result = await demandeAudienceService.getAllDemandes(req.query, directionId);
+    const directionIds = globalAccess ? null : await resolveAgentDirection(req.user.agentId);
+    const result = await demandeAudienceService.getAllDemandes(req.query, directionIds);
     return res.status(200).json({
       success: true,
       message: 'Demandes récupérées avec succès',
