@@ -6,7 +6,6 @@ const { sequelize } = require('../../config/database');
 
 /**
  * Recrée toutes les tables vides — à appeler dans un beforeEach pour isoler chaque test.
- *
  * Supprime temporairement l'avertissement Sequelize "SQLite does not support TEXT with
  * options" : certains modèles utilisent TEXT('long') (= LONGTEXT en MySQL, légitime en
  * prod), que SQLite ne supporte pas nativement — Sequelize le signale à chaque sync()
