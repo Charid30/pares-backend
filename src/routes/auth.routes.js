@@ -5,12 +5,13 @@ const authController = require('../controllers/auth.controller');
 const validate = require('../middlewares/validate.middleware');
 const { authenticate } = require('../middlewares/auth.middleware');
 const { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } = require('../validators/auth.validator');
+const honeypot = require('../middlewares/honeypot.middleware');
 
 /**
  * @route   POST /api/auth/register
  * @access  Public
  */
-router.post('/register', validate(registerSchema), authController.register);
+router.post('/register', honeypot, validate(registerSchema), authController.register);
 
 /**
  * @route   POST /api/auth/login
