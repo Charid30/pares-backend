@@ -43,15 +43,19 @@ const registerSchema = Joi.object({
   
   // Candidat
   nom: Joi.string()
+    .pattern(/^[A-Za-zÀ-ÿ\s'\-]{2,80}$/)
     .required()
     .messages({
       'string.empty': 'Le nom est requis',
+      'string.pattern.base': 'Le nom ne doit contenir que des lettres, espaces, apostrophes ou tirets',
     }),
-  
+
   prenom: Joi.string()
+    .pattern(/^[A-Za-zÀ-ÿ\s'\-]{2,80}$/)
     .required()
     .messages({
       'string.empty': 'Le prénom est requis',
+      'string.pattern.base': 'Le prénom ne doit contenir que des lettres, espaces, apostrophes ou tirets',
     }),
   
   email: Joi.string()
