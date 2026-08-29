@@ -2,6 +2,7 @@
 const authService = require('../services/auth.service');
 const { success, error } = require('../utils/response.util');
 const env = require('../config/env');
+const { generate } = require('../utils/formTokenStore');
 
 // Options de base du cookie JWT (HttpOnly — inaccessible depuis JS côté client)
 const baseCookieOptions = {
@@ -120,6 +121,10 @@ const logout = async (req, res) => {
   return success(res, null, 'Déconnexion réussie');
 };
 
+const getFormToken = (req, res) => {
+  return success(res, { token: generate() }, 'Token généré');
+};
+
 module.exports = {
   register,
   login,
@@ -127,4 +132,5 @@ module.exports = {
   forgotPassword,
   resetPassword,
   logout,
+  getFormToken,
 };

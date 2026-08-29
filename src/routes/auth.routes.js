@@ -6,12 +6,19 @@ const validate = require('../middlewares/validate.middleware');
 const { authenticate } = require('../middlewares/auth.middleware');
 const { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } = require('../validators/auth.validator');
 const honeypot = require('../middlewares/honeypot.middleware');
+const formToken = require('../middlewares/formToken.middleware');
+
+/**
+ * @route   GET /api/auth/form-token
+ * @access  Public — appelé au chargement du formulaire d'inscription
+ */
+router.get('/form-token', authController.getFormToken);
 
 /**
  * @route   POST /api/auth/register
  * @access  Public
  */
-router.post('/register', honeypot, validate(registerSchema), authController.register);
+router.post('/register', honeypot, formToken, validate(registerSchema), authController.register);
 
 /**
  * @route   POST /api/auth/login

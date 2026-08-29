@@ -93,6 +93,9 @@ const registerSchema = Joi.object({
     .messages({
       'string.pattern.base': 'Le numéro IFU doit contenir 8 chiffres suivis d\'une lettre (ex: 12345678A)',
     }),
+
+  formToken: Joi.string().optional().allow('', null),
+  website: Joi.string().optional().allow('', null),
 })
   .xor('nip', 'passeport')
   .messages({
