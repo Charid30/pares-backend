@@ -920,20 +920,6 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
     statusRenouvellement: 'EN_ATTENTE',
   });
 
-  // Reconduire la convention dans document_stage du nouveau stage pour que les renouvellements
-  // ultérieurs puissent la retrouver (getConventionPourRenouvellement cherche dans document_stage)
-  if (conventionDoc) {
-    await DocumentStage.create({
-      stage_idstage: nouveauStage.idstage,
-      typeDocument: 'CONVENTION',
-      document: conventionDoc.document,
-      document_filename: conventionDoc.document_filename,
-      document_size: conventionDoc.document_size,
-      emetteurNom: conventionDoc.emetteurNom,
-      dateEmission: conventionDoc.dateEmission,
-      dateExpiration: conventionDoc.dateExpiration,
-    });
-  }
 
   // Consommer l'autorisation si le stage était TERMINE/EXPIRE
   if (autorisationActive) {

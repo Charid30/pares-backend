@@ -991,7 +991,6 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
 
   await renouvellement.update(data);
 
-  // Si accepté, mettre à jour le statut du nouveau stage et calculer ses dates effectives
   if (data.statusRenouvellement === 'ACCEPTE') {
     const stageActuelDateFin = renouvellement.stageActuel?.dateFinEffective;
 
@@ -999,12 +998,10 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
     let dateFinEffectiveNouveau = null;
 
     if (stageActuelDateFin) {
-      // Le nouveau stage commence le lendemain de la fin du stage actuel
       const lendemain = new Date(stageActuelDateFin);
       lendemain.setDate(lendemain.getDate() + 1);
       dateDebutEffectiveNouveau = lendemain.toISOString().split('T')[0];
 
-      // Calcul date fin inclusive : début + durée - 1 jour
       dateFinEffectiveNouveau = calculerDateFin(
         dateDebutEffectiveNouveau,
         renouvellement.dureeDemandee
