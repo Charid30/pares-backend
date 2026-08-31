@@ -17,6 +17,21 @@ const COUNTRY_NAMES = {
  * Retourne null pour les IP locales/privées (127.0.0.1, 192.168.x.x, ::1...)
  * ou si l'IP est absente de la base.
  */
+// Extrait un libellé de région à partir du fuseau horaire quand le pays est absent
+// ex: "America/New_York" → "Amérique", "Europe/Paris" → "Europe", etc.
+const TIMEZONE_REGION = {
+  Africa: 'Afrique', America: 'Amérique', Antarctica: 'Antarctique',
+  Arctic: 'Arctique', Asia: 'Asie', Atlantic: 'Atlantique',
+  Australia: 'Australie/Pacifique', Europe: 'Europe', Indian: 'Océan Indien',
+  Pacific: 'Pacifique',
+};
+
+const regionFromTimezone = (tz) => {
+  if (!tz) return null;
+  const continent = tz.split('/')[0];
+  return TIMEZONE_REGION[continent] || null;
+};
+
 const locateIp = (ip) => {
   if (!ip || ip === 'unknown') return null;
 
@@ -26,12 +41,15 @@ const locateIp = (ip) => {
   const result = geoip.lookup(cleanIp);
   if (!result) return null;
 
+  const country = result.country || null;
   return {
-    country: result.country || null,
-    countryName: COUNTRY_NAMES[result.country] || result.country || null,
+    country,
+    countryName: country ? (COUNTRY_NAMES[country] || country) : null,
     region: result.region || null,
     city: result.city || null,
-    ll: result.ll || null, // [latitude, longitude]
+    ll: result.ll || null,
+    // Fuseau horaire utilisé comme repli quand le pays est absent (IPs cloud/datacenter)
+    timezoneRegion: !country ? regionFromTimezone(result.timezone) : null,
   };
 };
 
