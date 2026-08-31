@@ -80,6 +80,7 @@ const allowedOrigins = [
   'http://localhost:80',             // Déployé sur XAMPP port 80 (explicite)
   env.FRONTEND_URL,                  // URL principale (depuis .env)
   'https://portail.sonabhy.bf',      // Portail SONABHY
+  'https://www.portail.sonabhy.bf',      // Portail SONABHY
   'http://192.168.1.66:4200',
 ].filter(Boolean);
 
