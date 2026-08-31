@@ -88,7 +88,9 @@ const localNetworkRegex = /^http:\/\/(172\.20\.\d+\.\d+|172\.\d+\.\d+\.\d+|10\.\
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Autoriser les requêtes sans origin (Postman, apps mobiles natives)
+    // Autoriser les requêtes sans origin (Postman, apps mobiles natives).
+    // Risque accepté : toute requête serveur-à-serveur ou curl peut contourner le CORS.
+    // Atténué par l'authentification JWT obligatoire sur toutes les routes protégées.
     if (!origin) {
       return callback(null, true);
     }

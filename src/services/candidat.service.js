@@ -459,7 +459,6 @@ const soumettreDemandeStage = async (candidatId, data, files) => {
     throw new Error('Le domaine de stage est requis');
   }
 
-  console.log('[soumettreDemandeStage] direction:', data.direction_iddirection, '| service:', data.service_idservice, '| domaine:', data.domaineStage);
 
   const stageData = {
     candidats_idcandidats: candidatId,

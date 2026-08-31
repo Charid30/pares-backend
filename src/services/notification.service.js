@@ -32,9 +32,8 @@ const notifyAgents = async (notificationType, subject, html, inappPayload = null
       // Email
       try {
         await emailService.sendEmail({ to: pref.agent.email, subject, html });
-        console.log(`📧 Notif agent [${notificationType}] → ${pref.agent.email}`);
       } catch (e) {
-        console.error(`❌ Email agent ${pref.agent.email} échoué:`, e.message);
+        console.error(`❌ Email agent échoué:`, e.message);
       }
       // In-app
       if (inappPayload) {
@@ -78,7 +77,7 @@ const notifyAdmins = async (subject, html, inappPayload = null) => {
         try {
           await emailService.sendEmail({ to: agent.email, subject, html });
         } catch (e) {
-          console.error(`❌ Email admin ${agent.email} échoué:`, e.message);
+          console.error(`❌ Email admin échoué:`, e.message);
         }
         if (inappPayload) {
           await inapp.push({ recipientType: 'AGENT', recipientId: agent.idagents, ...inappPayload });
@@ -467,19 +466,27 @@ const initAgentNotificationPrefs = async (agentId) => {
 // =====================================================
 
 const broadcastCandidats = async (subject, html) => {
+  const BATCH = 100;
+  let offset = 0;
   try {
-    const candidats = await Candidat.findAll({
-      where: { del: 0 },
-      attributes: ['idcandidats', 'email', 'nom', 'prenom'],
-    });
-    for (const c of candidats) {
-      try {
-        await emailService.sendEmail({ to: c.email, subject, html });
-      } catch (e) {
-        console.error(`❌ Broadcast ${c.email}:`, e.message);
+    while (true) {
+      const candidats = await Candidat.findAll({
+        where: { del: 0 },
+        attributes: ['idcandidats', 'email', 'nom', 'prenom'],
+        limit: BATCH,
+        offset,
+      });
+      if (!candidats.length) break;
+      for (const c of candidats) {
+        try {
+          await emailService.sendEmail({ to: c.email, subject, html });
+        } catch (e) {
+          console.error(`❌ Broadcast email échoué:`, e.message);
+        }
       }
+      offset += BATCH;
+      if (candidats.length < BATCH) break;
     }
-    console.log(`📧 Broadcast envoyé à ${candidats.length} candidats`);
   } catch (err) {
     console.error('❌ Erreur broadcast candidats:', err.message);
   }
@@ -492,26 +499,34 @@ const broadcastCandidats = async (subject, html) => {
  * @param {object} inappPayload - { type, titre, message, link }
  */
 const broadcastCandidatsWithInApp = async (subject, html, inappPayload) => {
+  const BATCH = 100;
+  let offset = 0;
   try {
-    const candidats = await Candidat.findAll({
-      where: { del: 0 },
-      attributes: ['idcandidats', 'email', 'nom', 'prenom'],
-    });
-    for (const c of candidats) {
-      try {
-        await emailService.sendEmail({ to: c.email, subject, html });
-      } catch (e) {
-        console.error(`❌ Broadcast email ${c.email}:`, e.message);
+    while (true) {
+      const candidats = await Candidat.findAll({
+        where: { del: 0 },
+        attributes: ['idcandidats', 'email', 'nom', 'prenom'],
+        limit: BATCH,
+        offset,
+      });
+      if (!candidats.length) break;
+      for (const c of candidats) {
+        try {
+          await emailService.sendEmail({ to: c.email, subject, html });
+        } catch (e) {
+          console.error(`❌ Broadcast email échoué:`, e.message);
+        }
+        if (inappPayload) {
+          await inapp.push({
+            recipientType: 'CANDIDAT',
+            recipientId: c.idcandidats,
+            ...inappPayload,
+          });
+        }
       }
-      if (inappPayload) {
-        await inapp.push({
-          recipientType: 'CANDIDAT',
-          recipientId: c.idcandidats,
-          ...inappPayload,
-        });
-      }
+      offset += BATCH;
+      if (candidats.length < BATCH) break;
     }
-    console.log(`📧📲 Broadcast envoyé à ${candidats.length} candidats`);
   } catch (err) {
     console.error('❌ Erreur broadcastCandidatsWithInApp:', err.message);
   }

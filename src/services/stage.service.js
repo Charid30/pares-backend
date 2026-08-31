@@ -75,7 +75,6 @@ const createStage = async (candidatId, data, files) => {
   }
 
   // ── Préparer les données du stage ─────────────────────────────────────────
-  console.log('[createStage] direction reçue:', data.direction_iddirection, '| service reçu:', data.service_idservice);
 
   if (!data.direction_iddirection) {
     throw new Error('La direction est requise pour soumettre une demande de stage');
@@ -1535,13 +1534,56 @@ const getStagesSuivi = async (filters = {}) => {
     order: [['dateDebutEffective', 'ASC']],
   });
 
+  // Précharger tous les stages des candidats concernés en une seule requête
+  const candidatIds = [...new Set(stages.map(s => s.candidats_idcandidats))];
+  const CHAIN_STATUSES = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'ACCEPTE', 'EN_COURS', 'TERMINE', 'EXPIRE', 'RAPPORT_SOUMIS'];
+  const chainStages = candidatIds.length > 0
+    ? await Stage.findAll({
+        where: { candidats_idcandidats: { [Op.in]: candidatIds }, del: 0, statusStage: { [Op.in]: CHAIN_STATUSES } },
+        attributes: ['idstage', 'stage_parent_idstage', 'dateDebutEffective', 'dateFinEffective', 'dureeStage', 'statusStage', 'candidats_idcandidats', 'createdDate'],
+      })
+    : [];
+
+  // Index en mémoire pour traversal sans DB
+  const stageById = {};
+  const stagesByParent = {};
+  for (const s of chainStages) {
+    stageById[s.idstage] = s;
+    if (s.stage_parent_idstage) {
+      if (!stagesByParent[s.stage_parent_idstage]) stagesByParent[s.stage_parent_idstage] = [];
+      stagesByParent[s.stage_parent_idstage].push(s);
+    }
+  }
+
+  const calculerDurreeChaineSync = (candidatId, stageRacineId) => {
+    let racine = stageById[stageRacineId];
+    if (!racine || racine.candidats_idcandidats !== candidatId) {
+      return { dureeTotaleJours: 0, dureeTotaleMois: 0, dateDebutChaine: null, dateFinChaine: null, dateMinRepos: null };
+    }
+    // Remonter à la vraie racine
+    while (racine.stage_parent_idstage && stageById[racine.stage_parent_idstage]) {
+      racine = stageById[racine.stage_parent_idstage];
+    }
+    if (!racine.dateDebutEffective) {
+      return { dureeTotaleJours: 0, dureeTotaleMois: 0, dateDebutChaine: null, dateFinChaine: null, dateMinRepos: null };
+    }
+    // Descendre jusqu'au dernier maillon
+    let dernier = racine;
+    while (true) {
+      const enfants = stagesByParent[dernier.idstage];
+      if (!enfants || !enfants.length) break;
+      dernier = enfants.sort((a, b) => new Date(b.createdDate) - new Date(a.createdDate))[0];
+    }
+    return calculerDureeEtRepos(racine.dateDebutEffective, dernier.dateFinEffective);
+  };
+
   // Pour chaque stage EN_COURS, calculer la durée cumulée de la chaîne
-  const allItems = await Promise.all(stages.map(async (stage) => {
+  const allItems = stages.map((stage) => {
     const stageJson = stage.toJSON();
 
     // Trouver l'ID de la racine de la chaîne
     const rootId = stageJson.stage_parent_idstage || stageJson.idstage;
-    const dureeInfo = await calculerDureeChaine(stageJson.candidats_idcandidats, rootId);
+    const dureeInfo = calculerDurreeChaineSync(stageJson.candidats_idcandidats, rootId);
 
     // Calculer les jours restants du stage actuel
     let joursRestants = null;
@@ -1573,7 +1615,7 @@ const getStagesSuivi = async (filters = {}) => {
       renouvellementPossible: moisConsommes < 6,
       joursRestants,
     };
-  }));
+  });
 
   // Pagination
   const page = parseInt(filters.page) || 1;

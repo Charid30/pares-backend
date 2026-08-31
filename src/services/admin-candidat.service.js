@@ -80,19 +80,21 @@ const getCandidats = async ({ page = 1, limit = 10, search = '', sortBy = 'creat
     distinct: true
   });
 
-  // Ajouter les statistiques pour chaque candidat
-  const candidatsWithStats = await Promise.all(rows.map(async (candidat) => {
-    const candidatJSON = candidat.toJSON();
+  // Compter les stages par candidat en une seule requête
+  const ids = rows.map(c => c.idcandidats);
+  const stageCounts = ids.length > 0
+    ? await Stage.count({
+        where: { candidats_idcandidats: { [Op.in]: ids }, del: 0 },
+        group: ['candidats_idcandidats'],
+        attributes: ['candidats_idcandidats'],
+      })
+    : [];
+  const countMap = {};
+  stageCounts.forEach(r => { countMap[r.candidats_idcandidats] = parseInt(r.count) || 0; });
 
-    // Compter les demandes de stage
-    const stagesCount = await Stage.count({
-      where: { candidats_idcandidats: candidat.idcandidats, del: 0 }
-    });
-
-    return {
-      ...candidatJSON,
-      stagesCount
-    };
+  const candidatsWithStats = rows.map(candidat => ({
+    ...candidat.toJSON(),
+    stagesCount: countMap[candidat.idcandidats] || 0
   }));
 
   return {
@@ -108,7 +110,6 @@ const getCandidats = async ({ page = 1, limit = 10, search = '', sortBy = 'creat
  * Récupérer un candidat par ID avec ses détails complets
  */
 const getCandidatById = async (id) => {
-  console.log('Service getCandidatById - ID reçu:', id, 'Type:', typeof id);
 
   try {
     const candidat = await Candidat.findOne({
@@ -121,7 +122,6 @@ const getCandidatById = async (id) => {
       }]
     });
 
-    console.log('Candidat trouvé:', candidat ? 'Oui' : 'Non');
 
     if (!candidat) {
       throw new Error('Candidat non trouvé');
@@ -137,7 +137,6 @@ const getCandidatById = async (id) => {
         order: [['createdDate', 'DESC']],
         limit: 5
       });
-      console.log('Stages trouvés:', stages.length);
     } catch (stageErr) {
       console.error('Erreur lors de la récupération des stages:', stageErr.message);
     }
@@ -157,7 +156,6 @@ const getCandidatById = async (id) => {
       console.error('Erreur lors du calcul des statistiques:', statsErr.message);
     }
 
-    console.log('Retour du candidat avec stats:', stats);
 
     return {
       ...candidatJSON,
