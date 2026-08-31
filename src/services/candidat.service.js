@@ -148,37 +148,46 @@ const updateProfilCandidat = async (candidatId, data) => {
 // =====================================================
 
 /**
- * Récupérer les stages du candidat avec leurs rapports et attestations
+ * Récupérer les stages du candidat avec leurs rapports et attestations.
+ * Le rapport est toujours porté par le stage racine ; les renouvellements
+ * héritent automatiquement du rapport de leur ancêtre via la chaîne parent.
  */
 const getStagesRapportsCandidat = async (candidatId) => {
   const stages = await Stage.findAll({
-    where: {
-      candidats_idcandidats: candidatId,
-      del: 0,
-    },
+    where: { candidats_idcandidats: candidatId, del: 0 },
     include: [
       {
         model: RapportStage,
         as: 'rapport',
-        required: false, // LEFT JOIN pour inclure les stages sans rapport
-        include: [
-          {
-            model: DocumentStage,
-            as: 'attestations',
-            required: false,
-          },
-        ],
+        required: false,
+        include: [{ model: DocumentStage, as: 'attestations', required: false }],
       },
     ],
     order: [['createdDate', 'DESC']],
   });
 
-  // Formater les données pour le frontend
-  return stages.map(stage => {
-    // Filtrer le rapport (del = 0)
-    const rapport = stage.rapport && stage.rapport.del === 0 ? stage.rapport : null;
+  // Index par ID pour retrouver les ancêtres en mémoire (évite des requêtes DB)
+  const stageById = {};
+  stages.forEach(s => { stageById[s.idstage] = s; });
 
-    // Filtrer l'attestation (typeDocument = ATTESTATION, del = 0)
+  const findRootInMemory = (stageId) => {
+    let current = stageById[stageId];
+    while (current?.stage_parent_idstage && stageById[current.stage_parent_idstage]) {
+      current = stageById[current.stage_parent_idstage];
+    }
+    return current;
+  };
+
+  return stages.map(stage => {
+    // Rapport direct sur ce stage, ou hérité depuis la racine de la chaîne
+    let rapport = stage.rapport?.del === 0 ? stage.rapport : null;
+    if (!rapport && stage.stage_parent_idstage) {
+      const root = findRootInMemory(stage.idstage);
+      if (root && root.idstage !== stage.idstage) {
+        rapport = root.rapport?.del === 0 ? root.rapport : null;
+      }
+    }
+
     const attestation = rapport?.attestations?.find(
       doc => doc.typeDocument === 'ATTESTATION' && doc.del === 0
     ) || null;
@@ -190,14 +199,12 @@ const getStagesRapportsCandidat = async (candidatId) => {
       dateDebutEffective: stage.dateDebutEffective,
       dateFinEffective: stage.dateFinEffective,
       statusStage: stage.statusStage,
-      // Infos rapport
       rapportSoumis: !!rapport,
       idrapport: rapport?.idrapport || null,
       titreRapport: rapport?.titreRapport || null,
       dateSoumissionRapport: rapport?.createdDate || null,
       statusRapport: rapport?.statusRapport || null,
       noteRapport: rapport?.noteRapport || null,
-      // Infos attestation
       attestationDisponible: !!attestation,
       idattestation: attestation?.iddocument || null,
       numeroAttestation: attestation?.numeroAttestation || null,
@@ -573,54 +580,70 @@ const soumettreDemandeStage = async (candidatId, data, files) => {
 };
 
 /**
- * Soumettre un rapport de stage
+/**
+ * Remonte la chaîne parent pour trouver le stage racine (stage initial).
+ * Un renouvellement pointe vers son parent via stage_parent_idstage.
+ */
+const findChainRoot = async (stageId) => {
+  let current = await Stage.findOne({ where: { idstage: stageId, del: 0 } });
+  while (current?.stage_parent_idstage) {
+    const parent = await Stage.findOne({ where: { idstage: current.stage_parent_idstage, del: 0 } });
+    if (!parent) break;
+    current = parent;
+  }
+  return current;
+};
+
+/**
+ * Retourne tous les stages de la chaîne (racine + renouvellements) via BFS.
+ */
+const findAllChainMembers = async (rootId, candidatId) => {
+  const members = [];
+  const toVisit = [rootId];
+  while (toVisit.length) {
+    const id = toVisit.shift();
+    const children = await Stage.findAll({
+      where: { stage_parent_idstage: id, candidats_idcandidats: candidatId, del: 0 },
+    });
+    for (const c of children) {
+      members.push(c);
+      toVisit.push(c.idstage);
+    }
+  }
+  return members;
+};
+
+/**
+ * Soumettre un rapport de stage.
+ * Le rapport est toujours attaché au stage racine de la chaîne afin
+ * qu'il soit partagé entre le stage initial et ses renouvellements.
  */
 const soumettreRapportStage = async (candidatId, stageId, data, file) => {
   // Vérifier que le stage existe et appartient au candidat
   const stage = await Stage.findOne({
-    where: {
-      idstage: stageId,
-      candidats_idcandidats: candidatId,
-      del: 0,
-    },
+    where: { idstage: stageId, candidats_idcandidats: candidatId, del: 0 },
   });
+  if (!stage) throw new Error('Stage non trouvé ou accès non autorisé');
 
-  if (!stage) {
-    throw new Error('Stage non trouvé ou accès non autorisé');
-  }
-
-  // Vérifier que le stage est en cours, terminé ou expiré (pas en attente, pas rejeté, pas déjà rapport soumis)
+  // Vérifier que le stage est en cours, terminé ou expiré
   const statutsValides = ['EN_COURS', 'TERMINE', 'EXPIRE'];
   if (!statutsValides.includes(stage.statusStage)) {
     throw new Error(`Le rapport ne peut être soumis que pour un stage en cours, terminé ou expiré. Statut actuel: ${stage.statusStage}`);
   }
 
-  // Vérifier qu'il n'y a pas déjà un rapport soumis
-  const rapportExistant = await RapportStage.findOne({
-    where: {
-      stage_idstage: stageId,
-      del: 0,
-    },
-  });
+  // Trouver la racine de la chaîne — le rapport est toujours porté par le stage initial
+  const root = await findChainRoot(stageId);
 
-  if (rapportExistant) {
-    throw new Error('Un rapport a déjà été soumis pour ce stage');
-  }
+  // Vérifier qu'aucun rapport n'existe déjà sur la racine
+  const rapportExistant = await RapportStage.findOne({ where: { stage_idstage: root.idstage, del: 0 } });
+  if (rapportExistant) throw new Error('Un rapport a déjà été soumis pour ce stage');
 
-  // Vérifier le fichier
-  if (!file) {
-    throw new Error('Le fichier du rapport est obligatoire');
-  }
-
-  // Vérifier que le fichier a un buffer
-  if (!file.buffer) {
-    throw new Error('Le contenu du fichier est vide ou invalide');
-  }
+  if (!file?.buffer) throw new Error('Le fichier du rapport est obligatoire');
 
   try {
-    // Créer le rapport
+    // Créer le rapport lié à la racine de la chaîne
     const rapport = await RapportStage.create({
-      stage_idstage: stageId,
+      stage_idstage: root.idstage,
       titreRapport: data.titreRapport,
       natureRapport: data.natureRapport || 'RAPPORT_STAGE',
       rapportPdf: file.buffer,
@@ -630,8 +653,10 @@ const soumettreRapportStage = async (candidatId, stageId, data, file) => {
       createdDate: new Date(),
     });
 
-    // Mettre à jour le statut du stage
-    await stage.update({ statusStage: 'RAPPORT_SOUMIS' });
+    // Passer tous les stages de la chaîne à RAPPORT_SOUMIS
+    const chainMembers = await findAllChainMembers(root.idstage, candidatId);
+    const allIds = [root.idstage, ...chainMembers.map(s => s.idstage)];
+    await Stage.update({ statusStage: 'RAPPORT_SOUMIS' }, { where: { idstage: { [Op.in]: allIds } } });
 
     return {
       idrapport: rapport.idrapport,
@@ -940,31 +965,19 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
 };
 
 /**
- * Vérifier si un rapport existe pour un stage
+ * Vérifier si un rapport existe pour un stage (cherche sur toute la chaîne).
  */
 const getRapportByStageId = async (candidatId, stageId) => {
   const stage = await Stage.findOne({
-    where: {
-      idstage: stageId,
-      candidats_idcandidats: candidatId,
-      del: 0,
-    },
+    where: { idstage: stageId, candidats_idcandidats: candidatId, del: 0 },
   });
+  if (!stage) throw new Error('Stage non trouvé ou accès non autorisé');
 
-  if (!stage) {
-    throw new Error('Stage non trouvé ou accès non autorisé');
-  }
+  // Le rapport est toujours attaché à la racine de la chaîne
+  const root = await findChainRoot(stageId);
 
-  const rapport = await RapportStage.findOne({
-    where: {
-      stage_idstage: stageId,
-      del: 0,
-    },
-  });
-
-  if (!rapport) {
-    return null;
-  }
+  const rapport = await RapportStage.findOne({ where: { stage_idstage: root.idstage, del: 0 } });
+  if (!rapport) return null;
 
   return {
     idrapport: rapport.idrapport,
