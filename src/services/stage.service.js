@@ -485,14 +485,34 @@ const getStageById = async (id, user = null) => {
     throw new Error('Stage non trouvé');
   }
 
-  // Extraire le renouvellement si c'est un stage de renouvellement
   const stageData = stage.toJSON();
-  if (stageData.estRenouvellement && stageData.renouvellementsNouveaux && stageData.renouvellementsNouveaux.length > 0) {
+
+  // Extraire le renouvellement si c'est un stage de renouvellement
+  if (stageData.estRenouvellement && stageData.renouvellementsNouveaux?.length > 0) {
     stageData.renouvellementInfo = stageData.renouvellementsNouveaux[0];
   } else {
     stageData.renouvellementInfo = null;
   }
   delete stageData.renouvellementsNouveaux;
+
+  // Rapport partagé sur la chaîne : si ce stage n'a pas de rapport direct
+  // mais a un parent, on remonte jusqu'à la racine pour récupérer le rapport.
+  if (!stageData.rapport && stageData.stage_parent_idstage) {
+    let parentId = stageData.stage_parent_idstage;
+    while (parentId) {
+      const parent = await Stage.findOne({
+        where: { idstage: parentId, del: 0 },
+        include: [{ model: RapportStage, as: 'rapport', required: false, attributes: { exclude: ['rapportPdf'] } }],
+        attributes: ['idstage', 'stage_parent_idstage'],
+      });
+      if (!parent) break;
+      if (parent.rapport && parent.rapport.del === 0) {
+        stageData.rapport = parent.rapport.toJSON ? parent.rapport.toJSON() : parent.rapport;
+        break;
+      }
+      parentId = parent.stage_parent_idstage;
+    }
+  }
 
   return stageData;
 };
