@@ -91,6 +91,23 @@ const annulerDemande = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────────────────────
+// GET /api/demandes-audience/stats
+// Admin / Agents — compteurs réels par statut (respecte le filtre direction)
+// ─────────────────────────────────────────────────────────────
+const getStats = async (req, res) => {
+  try {
+    const roles = getUserRoles(req.user);
+    const globalAccess = roles.includes('ADMIN');
+    const directionIds = globalAccess ? null : await resolveAgentDirection(req.user.agentId);
+    const stats = await demandeAudienceService.getStats(directionIds);
+    return success(res, stats, 'Statistiques récupérées');
+  } catch (err) {
+    console.error('[DemandeAudience] getStats:', err.message);
+    return error(res, err.message, 500);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
 // GET /api/demandes-audience
 // Admin / Agents — lister toutes les demandes
 // ─────────────────────────────────────────────────────────────
@@ -356,6 +373,7 @@ module.exports = {
   createDemande,
   getMesDemandes,
   annulerDemande,
+  getStats,
   getAllDemandes,
   updateStatut,
   updateDemande,

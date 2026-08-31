@@ -347,11 +347,30 @@ const transfererDemande = async (demandeId, newDirectionId, agentId = null, agen
   });
 };
 
+// ─────────────────────────────────────────────────────────────
+// STATISTIQUES PAR STATUT (admin / agents — respecte le filtre direction)
+// ─────────────────────────────────────────────────────────────
+const getStats = async (directionIds = null) => {
+  const baseWhere = { del: 0 };
+  if (directionIds && directionIds.length > 0)
+    baseWhere.direction_iddirection = { [Op.in]: directionIds };
+
+  const [enAttente, accepte, rejete, annule] = await Promise.all([
+    DemandeAudience.count({ where: { ...baseWhere, status: 'EN_ATTENTE' } }),
+    DemandeAudience.count({ where: { ...baseWhere, status: 'ACCEPTE' } }),
+    DemandeAudience.count({ where: { ...baseWhere, status: 'REJETE' } }),
+    DemandeAudience.count({ where: { ...baseWhere, status: 'ANNULE' } }),
+  ]);
+
+  return { enAttente, accepte, rejete, annule, total: enAttente + accepte + rejete + annule };
+};
+
 module.exports = {
   createDemandeByCandidat,
   getMesDemandesByCandidat,
   annulerDemandeByCandidat,
   getAllDemandes,
+  getStats,
   updateStatut,
   updateDemande,
   transfererDemande,
