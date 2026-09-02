@@ -55,6 +55,14 @@ router.put(
 // ROUTES ADMIN / AGENTS
 // ─────────────────────────────────────────────────────────────
 
+// GET /api/demandes-audience/stats — compteurs par statut (doit être avant /:id)
+router.get(
+  '/stats',
+  authenticate,
+  authorizeModule('DEMANDE_AUDIENCE'),
+  demandeAudienceController.getStats
+);
+
 // GET /api/demandes-audience — toutes les demandes
 router.get(
   '/',
