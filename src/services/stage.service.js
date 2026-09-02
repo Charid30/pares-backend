@@ -573,17 +573,19 @@ const updateStatusStage = async (id, data, file = null, agentId = null, agentCon
       throw new Error('L\'ID de l\'agent est requis pour creer la convention');
     }
 
-    // Creer le document de convention dans document_stage
+    // Creer le document de convention dans document_stage (stockage disque)
+    const conventionPath = fileStorage.saveFile(file.buffer, file.originalname, 'conventions');
     await DocumentStage.create({
       stage_idstage: id,
-      rapport_idrapport: null, // Convention n'est pas liee a un rapport
+      rapport_idrapport: null,
       agents_idagents: agentId,
       typeDocument: 'CONVENTION',
-      document: file.buffer,
+      document: null,
+      document_path: conventionPath,
       document_filename: file.originalname,
       document_size: file.size,
-      dateEmission: data.dateDebutEffective, // Date d'emission = date de debut du stage
-      dateExpiration: data.dateFinEffective, // Date d'expiration = date de fin du stage
+      dateEmission: data.dateDebutEffective,
+      dateExpiration: data.dateFinEffective,
     });
   }
 
