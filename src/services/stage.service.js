@@ -580,7 +580,7 @@ const updateStatusStage = async (id, data, file = null, agentId = null, agentCon
       rapport_idrapport: null,
       agents_idagents: agentId,
       typeDocument: 'CONVENTION',
-      document: null,
+      document: Buffer.alloc(0),
       document_path: conventionPath,
       document_filename: file.originalname,
       document_size: file.size,
