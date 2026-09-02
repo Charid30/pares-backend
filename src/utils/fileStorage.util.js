@@ -23,6 +23,7 @@ const ALLOWED_SUBFOLDERS = new Set([
   'recrutements',
   'candidats',
   'agents',
+  'conventions',
   'temp',
 ]);
 
