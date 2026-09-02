@@ -64,6 +64,19 @@ const uploadRapport = multer({
   },
 });
 
+// Upload pour les conventions de stage : 5 Mo max (PDF multi-pages pouvant dépasser 1 Mo)
+const uploadConvention = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 Mo max
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Seuls les fichiers PDF sont acceptés'), false);
+    }
+  },
+});
+
 // =====================================================
 // ROUTES STAGES (routes fixes en premier)
 // =====================================================
@@ -522,7 +535,7 @@ router.put(
   '/:id/statut',
   authenticate,
   authorizeAnyAction('STAGE', ['VALIDER', 'REJETER']),
-  upload.single('conventionStage'),
+  uploadConvention.single('conventionStage'),
   validatePdfFiles,
   validate(updateStatusStageSchema),
   stageController.updateStatusStage
