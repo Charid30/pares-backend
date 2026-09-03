@@ -938,6 +938,7 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
     lettreMotivationRenouvellement_size: file.size,
     // Copier la convention depuis document_stage si elle existe
     conventionStageEnCours: conventionDoc ? conventionDoc.document : null,
+    conventionStageEnCours_path: conventionDoc ? conventionDoc.document_path : null,
     conventionStageEnCours_filename: conventionDoc ? conventionDoc.document_filename : null,
     conventionStageEnCours_size: conventionDoc ? conventionDoc.document_size : null,
     dureeDemandee: dureeDemandee,
