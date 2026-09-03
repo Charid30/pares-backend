@@ -1,8 +1,14 @@
 // src/validators/stage.validator.js
 const Joi = require('joi');
 
-// Clés des documents pouvant être joints à une demande de stage
+// Clés des documents d'un stage initial
 const DOCUMENT_KEYS = ['cv', 'cnib', 'casierJudiciaire', 'lettreMotivation', 'lettreRecommandation', 'dernierDiplome'];
+
+// Clés des documents d'un renouvellement (stockés dans la table renouvellement)
+const RENOUVELLEMENT_DOCUMENT_KEYS = ['lettreMotivationRenouvellement', 'conventionStageEnCours'];
+
+// Toutes les clés acceptées comme "documents non conformes" lors d'un rejet
+const ALL_DOCUMENT_KEYS = [...DOCUMENT_KEYS, ...RENOUVELLEMENT_DOCUMENT_KEYS];
 
 /**
  * Schéma de validation pour créer une demande de stage
@@ -109,7 +115,7 @@ const updateStatusStageSchema = Joi.object({
       if (keys.length === 0) {
         return helpers.error('string.empty');
       }
-      const invalid = keys.filter((k) => !DOCUMENT_KEYS.includes(k));
+      const invalid = keys.filter((k) => !ALL_DOCUMENT_KEYS.includes(k));
       if (invalid.length > 0) {
         return helpers.error('any.invalid');
       }
@@ -393,6 +399,7 @@ const evaluerDemandeModificationSchema = Joi.object({
 
 module.exports = {
   DOCUMENT_KEYS,
+  RENOUVELLEMENT_DOCUMENT_KEYS,
   createStageSchema,
   updateStatusStageSchema,
   updateStageSchema,
