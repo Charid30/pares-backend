@@ -1412,7 +1412,7 @@ const downloadLettreRenouvellement = async (renouvellementId) => {
 const downloadConventionRenouvellement = async (renouvellementId) => {
   const renouvellement = await RenouvellementStage.findOne({
     where: { idrenouvellement: renouvellementId, del: 0 },
-    attributes: ['idrenouvellement', 'conventionStageEnCours', 'conventionStageEnCours_filename', 'conventionStageEnCours_size'],
+    attributes: ['idrenouvellement', 'conventionStageEnCours', 'conventionStageEnCours_path', 'conventionStageEnCours_filename', 'conventionStageEnCours_size'],
   });
 
   if (!renouvellement) {
