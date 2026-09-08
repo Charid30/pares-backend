@@ -634,9 +634,10 @@ const updateStatusStage = async (id, data, file = null, agentId = null, agentCon
  * @param {number} candidatId - ID du candidat connecté (vérification de propriété)
  */
 const remplacerDocumentStage = async (id, type, file, candidatId) => {
-  const { DOCUMENT_KEYS } = require('../validators/stage.validator');
+  const { DOCUMENT_KEYS, RENOUVELLEMENT_DOCUMENT_KEYS } = require('../validators/stage.validator');
+  const ALL_KEYS = [...DOCUMENT_KEYS, ...RENOUVELLEMENT_DOCUMENT_KEYS];
 
-  if (!DOCUMENT_KEYS.includes(type)) {
+  if (!ALL_KEYS.includes(type)) {
     throw new Error('Type de document invalide');
   }
   if (!file) {
@@ -654,18 +655,36 @@ const remplacerDocumentStage = async (id, type, file, candidatId) => {
     throw new Error('Ce document n\'a pas été signalé comme non conforme');
   }
 
-  const update = {
-    [`${type}_path`]: fileStorage.saveFile(file.buffer, file.originalname, 'stages'),
-    [type]: null,
-    [`${type}_filename`]: file.originalname,
-    [`${type}_size`]: file.size,
-    lastmodifiedDate: new Date(),
-  };
-
   const documentsRestants = documentsRejetes.filter((k) => k !== type);
-  update.documentsRejetes = documentsRestants.length > 0 ? JSON.stringify(documentsRestants) : null;
+  const newDocumentsRejetes = documentsRestants.length > 0 ? JSON.stringify(documentsRestants) : null;
+  const filePath = fileStorage.saveFile(file.buffer, file.originalname, 'stages');
 
-  await stage.update(update);
+  if (RENOUVELLEMENT_DOCUMENT_KEYS.includes(type)) {
+    // Document stocké dans renouvellement_stage (lettre de renouvellement ou convention en cours)
+    const renouvellement = await RenouvellementStage.findOne({
+      where: { stage_nouveau_idstage: id },
+    });
+    if (!renouvellement) throw new Error('Demande de renouvellement non trouvée');
+
+    await renouvellement.update({
+      [type]: null,
+      [`${type}_path`]: filePath,
+      [`${type}_filename`]: file.originalname,
+      [`${type}_size`]: file.size,
+    });
+    await stage.update({ documentsRejetes: newDocumentsRejetes, lastmodifiedDate: new Date() });
+  } else {
+    await stage.update({
+      [type]: null,
+      [`${type}_path`]: filePath,
+      [`${type}_filename`]: file.originalname,
+      [`${type}_size`]: file.size,
+      lastmodifiedDate: new Date(),
+      documentsRejetes: newDocumentsRejetes,
+    });
+  }
+
+  await stage.reload();
   return stage;
 };
 
