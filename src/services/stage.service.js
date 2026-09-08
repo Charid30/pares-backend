@@ -1431,19 +1431,34 @@ const downloadLettreRenouvellement = async (renouvellementId) => {
 const downloadConventionRenouvellement = async (renouvellementId) => {
   const renouvellement = await RenouvellementStage.findOne({
     where: { idrenouvellement: renouvellementId, del: 0 },
-    attributes: ['idrenouvellement', 'conventionStageEnCours', 'conventionStageEnCours_path', 'conventionStageEnCours_filename', 'conventionStageEnCours_size'],
+    attributes: ['idrenouvellement', 'stage_actuel_idstage', 'conventionStageEnCours', 'conventionStageEnCours_path', 'conventionStageEnCours_filename', 'conventionStageEnCours_size'],
   });
 
   if (!renouvellement) {
     throw new Error('Demande de renouvellement non trouvée');
   }
 
-  if (!renouvellement.conventionStageEnCours) {
+  // Essayer d'abord ce qui est stocké dans renouvellement_stage (path ou BLOB)
+  let buffer = fileStorage.readFile(renouvellement.conventionStageEnCours_path, renouvellement.conventionStageEnCours);
+
+  // Fallback : si le buffer est vide (anciens enregistrements créés avant la migration vers disque),
+  // on va chercher la convention directement dans document_stage du stage parent
+  if (!buffer || buffer.length === 0) {
+    const conventionDoc = await DocumentStage.findOne({
+      where: { stage_idstage: renouvellement.stage_actuel_idstage, typeDocument: 'CONVENTION', del: 0 },
+      attributes: ['document', 'document_path', 'document_filename'],
+    });
+    if (conventionDoc) {
+      buffer = fileStorage.readFile(conventionDoc.document_path, conventionDoc.document);
+    }
+  }
+
+  if (!buffer || buffer.length === 0) {
     throw new Error('Aucune convention disponible pour cette demande de renouvellement');
   }
 
   return {
-    buffer: fileStorage.readFile(renouvellement.conventionStageEnCours_path, renouvellement.conventionStageEnCours),
+    buffer,
     filename: renouvellement.conventionStageEnCours_filename || `convention_renouvellement_${renouvellementId}.pdf`,
   };
 };
