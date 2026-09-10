@@ -1758,6 +1758,31 @@ const updateStage = async (stageId, data, agentContext = null) => {
     const { activerStagesAcceptes, expirerStagesEnCours } = require('../jobs/stageStatusJob');
     await activerStagesAcceptes();
     await expirerStagesEnCours();
+
+    // Cas particulier : le stage est EXPIRE à cause d'une erreur de date corrigée ici.
+    // Les jobs ci-dessus ne traitent pas EXPIRE. On recalcule le statut correct
+    // selon les nouvelles dates.
+    const stageActualise = await stage.reload();
+    if (stageActualise.statusStage === 'EXPIRE') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const debut = stageActualise.dateDebutEffective ? new Date(stageActualise.dateDebutEffective) : null;
+      const fin   = stageActualise.dateFinEffective   ? new Date(stageActualise.dateFinEffective)   : null;
+
+      let nouveauStatut = null;
+      if (debut && fin) {
+        if (fin < today) {
+          // Toujours expiré après correction — on ne touche pas
+        } else if (debut <= today) {
+          nouveauStatut = 'EN_COURS';
+        } else {
+          nouveauStatut = 'ACCEPTE';
+        }
+      }
+      if (nouveauStatut) {
+        await stage.update({ statusStage: nouveauStatut, lastmodifiedDate: new Date() });
+      }
+    }
   }
 
   return stage.reload();
