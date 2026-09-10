@@ -595,6 +595,16 @@ const updateStatusStage = async (id, data, file = null, agentId = null, agentCon
 
   await stage.update(data);
 
+  // Si on vient d'accepter le stage, vérifier immédiatement si la date de début
+  // est déjà atteinte (date passée ou aujourd'hui) pour passer directement à EN_COURS
+  // sans attendre le prochain passage du cron (toutes les 60 min).
+  if (data.statusStage === 'ACCEPTE') {
+    const { activerStagesAcceptes, expirerStagesEnCours } = require('../jobs/stageStatusJob');
+    await activerStagesAcceptes();
+    await expirerStagesEnCours();
+    await stage.reload();
+  }
+
   // Envoyer l'email de notification au candidat — en arrière-plan
   (async () => {
     try {
