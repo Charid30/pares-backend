@@ -1064,8 +1064,16 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
     throw new Error('Renouvellement non trouvé');
   }
 
-  if (renouvellement.statusRenouvellement !== 'EN_COURS_DE_TRAITEMENT') {
-    throw new Error(`Le renouvellement ne peut pas être évalué (statut actuel : ${renouvellement.statusRenouvellement}). Il doit d'abord être approuvé par un agent.`);
+  const statusValides = data.statusRenouvellement === 'REJETE'
+    ? ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT']
+    : ['EN_COURS_DE_TRAITEMENT'];
+
+  if (!statusValides.includes(renouvellement.statusRenouvellement)) {
+    throw new Error(
+      data.statusRenouvellement === 'ACCEPTE'
+        ? `Le renouvellement doit être en cours de traitement pour être accepté (statut actuel : ${renouvellement.statusRenouvellement}).`
+        : `Le renouvellement ne peut pas être refusé dans ce statut (statut actuel : ${renouvellement.statusRenouvellement}).`
+    );
   }
 
   await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
