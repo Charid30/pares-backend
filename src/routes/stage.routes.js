@@ -288,8 +288,20 @@ router.get(
 );
 
 /**
+ * @route   PUT /api/stages/renouvellements/:id/approuver
+ * @desc    Approuver une demande de renouvellement (agent — passe en EN_COURS_DE_TRAITEMENT)
+ * @access  Private — permission APPROUVER sur STAGE requise
+ */
+router.put(
+  '/renouvellements/:id/approuver',
+  authenticate,
+  authorizeAction('STAGE', 'APPROUVER'),
+  stageController.approuverRenouvellement
+);
+
+/**
  * @route   PUT /api/stages/renouvellements/:id/evaluer
- * @desc    Évaluer une demande de renouvellement (VALIDER ou REJETER)
+ * @desc    Évaluer une demande de renouvellement (admin — ACCEPTE ou REJETE)
  * @access  Private — permission VALIDER ou REJETER sur STAGE requise
  */
 router.put(

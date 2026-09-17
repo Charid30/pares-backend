@@ -1016,6 +1016,33 @@ const getAllRenouvellements = async (filters = {}) => {
  * Si ACCEPTE : calcule la date de début effective du nouveau stage (lendemain de la fin du stage actuel)
  *              et la date de fin effective via calculerDateFin.
  */
+const approuverRenouvellement = async (id, agentContext = null) => {
+  const renouvellement = await RenouvellementStage.findOne({
+    where: { idrenouvellement: id, del: 0 },
+    include: [
+      {
+        model: Stage,
+        as: 'stageNouveau',
+        attributes: ['idstage', 'direction_iddirection'],
+      },
+    ],
+  });
+
+  if (!renouvellement) {
+    throw new Error('Renouvellement non trouvé');
+  }
+
+  if (renouvellement.statusRenouvellement !== 'EN_ATTENTE') {
+    throw new Error(`Le renouvellement ne peut pas être approuvé (statut actuel : ${renouvellement.statusRenouvellement})`);
+  }
+
+  await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
+
+  await renouvellement.update({ statusRenouvellement: 'EN_COURS_DE_TRAITEMENT' });
+
+  return renouvellement.reload();
+};
+
 const evaluateRenouvellement = async (id, data, agentContext = null) => {
   const renouvellement = await RenouvellementStage.findOne({
     where: { idrenouvellement: id, del: 0 },
@@ -1035,6 +1062,10 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
 
   if (!renouvellement) {
     throw new Error('Renouvellement non trouvé');
+  }
+
+  if (renouvellement.statusRenouvellement !== 'EN_COURS_DE_TRAITEMENT') {
+    throw new Error(`Le renouvellement ne peut pas être évalué (statut actuel : ${renouvellement.statusRenouvellement}). Il doit d'abord être approuvé par un agent.`);
   }
 
   await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
@@ -2181,6 +2212,7 @@ module.exports = {
   // Renouvellements
   createRenouvellement,
   getAllRenouvellements,
+  approuverRenouvellement,
   evaluateRenouvellement,
   downloadLettreRenouvellement,
   downloadConventionRenouvellement,

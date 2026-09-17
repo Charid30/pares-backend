@@ -361,6 +361,27 @@ const getAllRenouvellements = async (req, res) => {
  * Évaluer un renouvellement (pour agents)
  * PUT /api/stages/renouvellements/:id/evaluer
  */
+const approuverRenouvellement = async (req, res) => {
+  try {
+    const renouvellement = await stageService.approuverRenouvellement(
+      req.params.id,
+      getAgentContext(req.user)
+    );
+    await auditService.log({
+      agentId:  req.user.agentId,
+      agentNom: req.user.username,
+      action:   'RENOUVELLEMENT_APPROUVE',
+      module:   'STAGE',
+      entityId: parseInt(req.params.id),
+      details:  { objet: 'Approbation demande de renouvellement de stage' },
+      ip: req.ip,
+    });
+    return success(res, renouvellement, 'Renouvellement approuvé avec succès');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
 const evaluateRenouvellement = async (req, res) => {
   try {
     const renouvellement = await stageService.evaluateRenouvellement(
@@ -1090,6 +1111,7 @@ module.exports = {
   // Renouvellements
   createRenouvellement,
   getAllRenouvellements,
+  approuverRenouvellement,
   evaluateRenouvellement,
   downloadLettreRenouvellement,
   downloadConventionRenouvellement,
