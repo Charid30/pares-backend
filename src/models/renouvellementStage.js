@@ -48,7 +48,7 @@ module.exports = (sequelize) => {
       comment: 'En mois',
     },
     statusRenouvellement: {
-      type: DataTypes.ENUM('EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'ACCEPTE', 'REJETE'),
+      type: DataTypes.ENUM('EN_ATTENTE', 'PROGRAMMATION_EN_COURS', 'ACCEPTE', 'REJETE'),
       defaultValue: 'EN_ATTENTE',
     },
     motifRefus: {

@@ -1038,7 +1038,7 @@ const approuverRenouvellement = async (id, agentContext = null) => {
 
   await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
 
-  await renouvellement.update({ statusRenouvellement: 'EN_COURS_DE_TRAITEMENT' });
+  await renouvellement.update({ statusRenouvellement: 'PROGRAMMATION_EN_COURS' });
 
   return renouvellement.reload();
 };
@@ -1065,8 +1065,8 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
   }
 
   const statusValides = data.statusRenouvellement === 'REJETE'
-    ? ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT']
-    : ['EN_COURS_DE_TRAITEMENT'];
+    ? ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS']
+    : ['PROGRAMMATION_EN_COURS'];
 
   if (!statusValides.includes(renouvellement.statusRenouvellement)) {
     throw new Error(
