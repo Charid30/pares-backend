@@ -1016,6 +1016,33 @@ const getAllRenouvellements = async (filters = {}) => {
  * Si ACCEPTE : calcule la date de début effective du nouveau stage (lendemain de la fin du stage actuel)
  *              et la date de fin effective via calculerDateFin.
  */
+const approuverRenouvellement = async (id, agentContext = null) => {
+  const renouvellement = await RenouvellementStage.findOne({
+    where: { idrenouvellement: id, del: 0 },
+    include: [
+      {
+        model: Stage,
+        as: 'stageNouveau',
+        attributes: ['idstage', 'direction_iddirection'],
+      },
+    ],
+  });
+
+  if (!renouvellement) {
+    throw new Error('Renouvellement non trouvé');
+  }
+
+  if (renouvellement.statusRenouvellement !== 'EN_ATTENTE') {
+    throw new Error(`Le renouvellement ne peut pas être approuvé (statut actuel : ${renouvellement.statusRenouvellement})`);
+  }
+
+  await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
+
+  await renouvellement.update({ statusRenouvellement: 'PROGRAMMATION_EN_COURS' });
+
+  return renouvellement.reload();
+};
+
 const evaluateRenouvellement = async (id, data, agentContext = null) => {
   const renouvellement = await RenouvellementStage.findOne({
     where: { idrenouvellement: id, del: 0 },
@@ -1035,6 +1062,18 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
 
   if (!renouvellement) {
     throw new Error('Renouvellement non trouvé');
+  }
+
+  const statusValides = data.statusRenouvellement === 'REJETE'
+    ? ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS']
+    : ['PROGRAMMATION_EN_COURS'];
+
+  if (!statusValides.includes(renouvellement.statusRenouvellement)) {
+    throw new Error(
+      data.statusRenouvellement === 'ACCEPTE'
+        ? `Le renouvellement doit être en cours de traitement pour être accepté (statut actuel : ${renouvellement.statusRenouvellement}).`
+        : `Le renouvellement ne peut pas être refusé dans ce statut (statut actuel : ${renouvellement.statusRenouvellement}).`
+    );
   }
 
   await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
@@ -2181,6 +2220,7 @@ module.exports = {
   // Renouvellements
   createRenouvellement,
   getAllRenouvellements,
+  approuverRenouvellement,
   evaluateRenouvellement,
   downloadLettreRenouvellement,
   downloadConventionRenouvellement,
