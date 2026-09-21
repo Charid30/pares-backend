@@ -141,6 +141,23 @@ const getAllStages = async (req, res) => {
 };
 
 /**
+ * Stages archivés (EXPIRE + sans parent)
+ * GET /api/stages/archives
+ */
+const getStagesArchives = async (req, res) => {
+  try {
+    const isSystemRole = await hasGlobalReadAccess(req.user, 'STAGE');
+    const archives = await stageService.getStagesArchives(req.query, {
+      agentId: req.user.agentId,
+      isSystemRole,
+    });
+    return success(res, archives, 'Archives récupérées avec succès');
+  } catch (err) {
+    return error(res, err.message, 500);
+  }
+};
+
+/**
  * Obtenir les statistiques des stages
  * GET /api/stages/stats
  */
@@ -909,6 +926,35 @@ const deleteStage = async (req, res) => {
   }
 };
 
+/**
+ * Suppression définitive d'un stage (irréversible)
+ * DELETE /api/stages/:id/permanent
+ */
+const hardDeleteStage = async (req, res) => {
+  try {
+    const result = await stageService.hardDeleteStage(req.params.id);
+    await auditService.log({
+      action: 'STAGE_SUPPRIME_DEFINITIF',
+      module: 'STAGE',
+      targetId: req.params.id,
+      userId: req.user?.id,
+      details: `Suppression définitive du stage #${req.params.id}`,
+    });
+    return success(res, result, 'Stage supprimé définitivement');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
+const rouvrirRenouvellement = async (req, res) => {
+  try {
+    const result = await stageService.rouvrirRenouvellement(req.params.id);
+    return success(res, result, 'Renouvellement rouvert avec succès');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
 // =====================================================
 // APPROBATION DE STAGE
 // =====================================================
@@ -1087,6 +1133,7 @@ module.exports = {
   // Stages
   createStage,
   getAllStages,
+  getStagesArchives,
   getStagesStats,
   getDomainesDistincts,
   checkAndUpdateStatuses,
@@ -1099,6 +1146,8 @@ module.exports = {
   exigerDocuments,
   resoumettreStage,
   deleteStage,
+  hardDeleteStage,
+  rouvrirRenouvellement,
   printAllStageDocuments,
   downloadStageDocument,
   downloadConventionStage,

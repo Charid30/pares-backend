@@ -136,4 +136,18 @@ router.post(
   candidatController.demanderRenouvellement
 );
 
+/**
+ * PUT /api/candidat/renouvellements/:id/ressoumettre
+ * Re-soumettre un renouvellement rejeté, avec remplacement optionnel des fichiers non conformes
+ * Files (optionnels): lettreRenouvellement, conventionRenouvellement
+ */
+router.put(
+  '/renouvellements/:id/ressoumettre',
+  uploadRapport.fields([
+    { name: 'lettreRenouvellement', maxCount: 1 },
+    { name: 'conventionRenouvellement', maxCount: 1 },
+  ]),
+  candidatController.resoumettreRenouvellement
+);
+
 module.exports = router;

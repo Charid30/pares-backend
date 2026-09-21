@@ -104,6 +104,18 @@ router.post(
 );
 
 /**
+ * @route   GET /api/stages/archives
+ * @desc    Stages archivés (EXPIRE + sans parent — hors renouvellements)
+ * @access  Private (ADMIN ou permission STAGE)
+ */
+router.get(
+  '/archives',
+  authenticate,
+  authorizeModule('STAGE'),
+  stageController.getStagesArchives
+);
+
+/**
  * @route   GET /api/stages/stats
  * @desc    Obtenir les statistiques des stages
  * @access  Private (ADMIN ou permission STAGE)
@@ -310,6 +322,18 @@ router.put(
   authorizeAnyAction('STAGE', ['VALIDER', 'REJETER']),
   validate(evaluateRenouvellementSchema),
   stageController.evaluateRenouvellement
+);
+
+/**
+ * @route   PUT /api/stages/renouvellements/:id/rouvrir
+ * @desc    Rouvrir un renouvellement rejeté sans attendre la re-soumission candidat (admin uniquement)
+ * @access  Private — ADMIN uniquement
+ */
+router.put(
+  '/renouvellements/:id/rouvrir',
+  authenticate,
+  authorize(['ADMIN']),
+  stageController.rouvrirRenouvellement
 );
 
 // =====================================================
@@ -661,6 +685,18 @@ router.delete(
   authenticate,
   authorizeAction('STAGE', 'SUPPRIMER'),
   stageController.deleteStage
+);
+
+/**
+ * @route   DELETE /api/stages/:id/permanent
+ * @desc    Suppression définitive d'un stage (irréversible, cascade sur toutes les données liées)
+ * @access  Private — ADMIN uniquement
+ */
+router.delete(
+  '/:id/permanent',
+  authenticate,
+  authorize(['ADMIN']),
+  stageController.hardDeleteStage
 );
 
 module.exports = router;

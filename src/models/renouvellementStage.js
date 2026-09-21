@@ -58,6 +58,21 @@ module.exports = (sequelize) => {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
     },
+    lettreNonConforme: {
+      type: DataTypes.TINYINT,
+      defaultValue: 0,
+      comment: '1 si la lettre de motivation a été signalée non conforme lors du rejet',
+    },
+    conventionNonConforme: {
+      type: DataTypes.TINYINT,
+      defaultValue: 0,
+      comment: '1 si la convention de stage a été signalée non conforme lors du rejet',
+    },
+    resoumis: {
+      type: DataTypes.TINYINT,
+      defaultValue: 0,
+      comment: '1 si ce renouvellement a été re-soumis après un rejet — seul l\'admin peut le traiter',
+    },
     del: {
       type: DataTypes.TINYINT,
       defaultValue: 0,
