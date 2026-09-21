@@ -1,5 +1,6 @@
 // src/controllers/candidat.controller.js
 const candidatService = require('../services/candidat.service');
+const stageService = require('../services/stage.service');
 const { success, error } = require('../utils/response.util');
 
 // =====================================================
@@ -301,6 +302,27 @@ const demanderRenouvellement = async (req, res) => {
   }
 };
 
+/**
+ * Re-soumettre un renouvellement rejeté
+ * PUT /api/candidat/renouvellements/:id/ressoumettre
+ */
+const resoumettreRenouvellement = async (req, res) => {
+  try {
+    const files = {};
+    if (req.files?.lettreRenouvellement?.[0]) files.lettre = req.files.lettreRenouvellement[0];
+    if (req.files?.conventionRenouvellement?.[0]) files.convention = req.files.conventionRenouvellement[0];
+
+    const result = await stageService.resoumettreRenouvellement(
+      req.params.id,
+      req.user.candidatId,
+      files
+    );
+    return success(res, result, 'Renouvellement re-soumis avec succès');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
 module.exports = {
   // Profil
   getProfil,
@@ -317,4 +339,5 @@ module.exports = {
   getRapportStage,
   getConventionPourRenouvellement,
   demanderRenouvellement,
+  resoumettreRenouvellement,
 };

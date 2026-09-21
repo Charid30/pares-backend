@@ -313,6 +313,17 @@ const getMesDemandesStage = async (candidatId) => {
         required: false,
         attributes: ['id', 'expiresAt', 'autorisePar'],
       },
+      {
+        model: RenouvellementStage,
+        as: 'renouvellementsNouveaux',
+        required: false,
+        attributes: [
+          'idrenouvellement', 'statusRenouvellement', 'motifRefus',
+          'lettreNonConforme', 'conventionNonConforme',
+          'lettreMotivationRenouvellement_filename',
+          'conventionStageEnCours_filename',
+        ],
+      },
     ],
     order: [['createdDate', 'DESC']],
   });
@@ -391,6 +402,21 @@ const getMesDemandesStage = async (candidatId) => {
       autorisationRenouvellement: (() => {
         const a = stage.autorisationsRenouvellement && stage.autorisationsRenouvellement[0];
         return a ? { id: a.id, expiresAt: a.expiresAt } : null;
+      })(),
+      // Infos de renouvellement si ce stage est issu d'un renouvellement
+      stage_parent_idstage: stage.stage_parent_idstage || null,
+      renouvellement: (() => {
+        const r = stage.renouvellementsNouveaux && stage.renouvellementsNouveaux[0];
+        if (!r) return null;
+        return {
+          idrenouvellement: r.idrenouvellement,
+          statusRenouvellement: r.statusRenouvellement,
+          motifRefus: r.motifRefus,
+          lettreNonConforme: !!r.lettreNonConforme,
+          conventionNonConforme: !!r.conventionNonConforme,
+          lettreFilename: r.lettreMotivationRenouvellement_filename,
+          conventionFilename: r.conventionStageEnCours_filename,
+        };
       })(),
     };
   });

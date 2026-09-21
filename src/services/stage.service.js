@@ -176,7 +176,7 @@ const getAllStages = async (filters = {}, agentContext = null) => {
   const { page = 1, limit = 10, statusStage, excludeStatus, typeStage, domaineStage, directionId, search } = filters;
   const offset = (page - 1) * limit;
 
-  const where = { del: 0 };
+  const where = { del: 0, stage_parent_idstage: null };
 
   if (statusStage) {
     if (statusStage === 'RESOUMISE') {
@@ -338,6 +338,83 @@ const getAllStages = async (filters = {}, agentContext = null) => {
     totalPages: Math.ceil(count / limit),
     limit: parseInt(limit),
     stats: { total, enAttente, accepte, enCours, termine, rejete },
+  };
+};
+
+/**
+ * Stages archivés : stages racines (sans parent) ayant expiré.
+ * Les stages issus de renouvellements restent visibles dans la section Renouvellements.
+ */
+const getStagesArchives = async (filters = {}, agentContext = null) => {
+  const { page = 1, limit = 10, typeStage, domaineStage, directionId, search } = filters;
+  const offset = (page - 1) * limit;
+
+  const where = { del: 0, statusStage: 'EXPIRE', stage_parent_idstage: null };
+
+  if (typeStage)     where.typeStage    = typeStage;
+  if (domaineStage)  where.domaineStage = { [Op.like]: `%${domaineStage}%` };
+  if (directionId)   where.direction_iddirection = parseInt(directionId, 10);
+
+  let agentDirectionIds = [];
+  if (agentContext && agentContext.agentId) {
+    const agent = await Agent.findByPk(agentContext.agentId, {
+      include: [
+        { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
+        { model: Direction, as: 'directionDirecte' },
+      ],
+    });
+    agentDirectionIds = getAgentDirectionIds(agent);
+  }
+
+  if (agentContext && !agentContext.isSystemRole && agentContext.agentId) {
+    if (agentDirectionIds.length > 0) {
+      where.direction_iddirection = { [Op.in]: agentDirectionIds };
+    } else {
+      where.direction_iddirection = { [Op.eq]: -1 };
+    }
+  }
+
+  const includeConfig = {
+    model: Candidat,
+    as: 'candidat',
+    attributes: ['idcandidats', 'nom', 'prenom', 'email', 'telephone'],
+  };
+  if (search) {
+    includeConfig.where = {
+      [Op.or]: [
+        { nom: { [Op.like]: `%${search}%` } },
+        { prenom: { [Op.like]: `%${search}%` } },
+        { email: { [Op.like]: `%${search}%` } },
+      ],
+    };
+  }
+
+  const { count, rows } = await Stage.findAndCountAll({
+    where,
+    include: [
+      includeConfig,
+      { model: Direction, as: 'direction', attributes: ['iddirection', 'nom', 'accronyme'], required: false },
+      { model: Service,   as: 'serviceStage', attributes: ['idservice', 'accronyme', 'description'], required: false },
+    ],
+    attributes: { exclude: ['cv', 'cnib', 'casierJudiciaire', 'lettreMotivation', 'lettreRecommandation', 'dernierDiplome'] },
+    order: [['dateFinEffective', 'DESC']],
+    limit: parseInt(limit),
+    offset: parseInt(offset),
+    distinct: true,
+  });
+
+  const items = rows.map((r) => {
+    const json = r.toJSON();
+    json.peutAgir = calculerPeutAgir(json.direction_iddirection, { agentContext, agentDirectionIds });
+    return json;
+  });
+
+  return {
+    items,
+    total: count,
+    page: parseInt(page),
+    totalPages: Math.ceil(count / limit),
+    limit: parseInt(limit),
   };
 };
 
@@ -1043,6 +1120,36 @@ const approuverRenouvellement = async (id, agentContext = null) => {
   return renouvellement.reload();
 };
 
+/**
+ * Rouvrir un renouvellement rejeté — action admin uniquement.
+ * Remet le renouvellement et le nouveau stage à EN_ATTENTE sans exiger de re-soumission candidat.
+ */
+const rouvrirRenouvellement = async (id) => {
+  const renouvellement = await RenouvellementStage.findOne({
+    where: { idrenouvellement: id, del: 0 },
+    include: [
+      { model: Stage, as: 'stageNouveau', attributes: ['idstage', 'statusStage'] },
+    ],
+  });
+
+  if (!renouvellement) throw new Error('Renouvellement non trouvé');
+  if (renouvellement.statusRenouvellement !== 'REJETE') {
+    throw new Error(`Seul un renouvellement rejeté peut être rouvert (statut actuel : ${renouvellement.statusRenouvellement})`);
+  }
+
+  await renouvellement.update({
+    statusRenouvellement: 'EN_ATTENTE',
+    motifRefus: null,
+    lettreNonConforme: 0,
+    conventionNonConforme: 0,
+    resoumis: 1,
+  });
+
+  await renouvellement.stageNouveau.update({ statusStage: 'EN_ATTENTE', motifRefus: null });
+
+  return renouvellement.reload();
+};
+
 const evaluateRenouvellement = async (id, data, agentContext = null) => {
   const renouvellement = await RenouvellementStage.findOne({
     where: { idrenouvellement: id, del: 0 },
@@ -1116,6 +1223,70 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
   }
 
   return renouvellement;
+};
+
+/**
+ * Ressoumettre un renouvellement rejeté.
+ * Si des fichiers ont été signalés non conformes, le candidat doit les fournir.
+ * Si aucun fichier n'est signalé, la re-soumission est possible sans changer les fichiers.
+ */
+const resoumettreRenouvellement = async (id, candidatId, files = {}) => {
+  const renouvellement = await RenouvellementStage.findOne({
+    where: { idrenouvellement: id, del: 0 },
+    include: [
+      { model: Stage, as: 'stageNouveau', attributes: ['idstage', 'statusStage', 'candidats_idcandidats'] },
+    ],
+  });
+
+  if (!renouvellement) throw new Error('Renouvellement non trouvé');
+  if (renouvellement.statusRenouvellement !== 'REJETE') {
+    throw new Error('Seul un renouvellement rejeté peut être re-soumis');
+  }
+
+  // Vérifier que le candidat est bien propriétaire
+  if (renouvellement.stageNouveau?.candidats_idcandidats !== candidatId) {
+    throw new Error('Action non autorisée');
+  }
+
+  // Si la lettre a été signalée non conforme, un nouveau fichier est obligatoire
+  if (renouvellement.lettreNonConforme && !files.lettre) {
+    throw new Error('La lettre de motivation doit être remplacée car elle a été jugée non conforme');
+  }
+
+  // Si la convention a été signalée non conforme, un nouveau fichier est obligatoire
+  if (renouvellement.conventionNonConforme && !files.convention) {
+    throw new Error('La convention de stage doit être remplacée car elle a été jugée non conforme');
+  }
+
+  const updateData = {
+    statusRenouvellement: 'EN_ATTENTE',
+    motifRefus: null,
+    lettreNonConforme: 0,
+    conventionNonConforme: 0,
+    resoumis: 1,
+  };
+
+  if (files.lettre) {
+    updateData.lettreMotivationRenouvellement = files.lettre.buffer;
+    updateData.lettreMotivationRenouvellement_filename = files.lettre.originalname;
+    updateData.lettreMotivationRenouvellement_size = files.lettre.size;
+  }
+
+  if (files.convention) {
+    updateData.conventionStageEnCours = files.convention.buffer;
+    updateData.conventionStageEnCours_filename = files.convention.originalname;
+    updateData.conventionStageEnCours_size = files.convention.size;
+  }
+
+  await renouvellement.update(updateData);
+
+  // Remettre le stage associé en EN_ATTENTE
+  await renouvellement.stageNouveau.update({
+    statusStage: 'EN_ATTENTE',
+    motifRefus: null,
+  });
+
+  return renouvellement.reload();
 };
 
 // =====================================================
@@ -1378,6 +1549,11 @@ const createDocumentStage = async (agentId, data, file) => {
     dateEmission: data.dateEmission,
     dateExpiration: data.dateExpiration || null,
   });
+
+  // Quand une convention est jointe à un stage accepté → passer EN_COURS
+  if (data.typeDocument === 'CONVENTION' && stage.statusStage === 'ACCEPTE') {
+    await stage.update({ statusStage: 'EN_COURS' });
+  }
 
   // Envoyer email de notification si c'est une attestation — en arrière-plan
   if (data.typeDocument === 'ATTESTATION' && stage.candidat) {
@@ -1876,6 +2052,46 @@ const deleteStage = async (stageId) => {
   return { deleted: true };
 };
 
+/**
+ * Suppression définitive d'un stage et de toutes ses données liées.
+ * Réservé aux administrateurs — irréversible.
+ */
+const hardDeleteStage = async (stageId) => {
+  const stage = await Stage.findOne({ where: { idstage: stageId } });
+  if (!stage) throw new Error('Stage non trouvé');
+
+  // Supprimer toutes les données liées avant le stage lui-même
+  await AutorisationRenouvellementStage.destroy({ where: { stage_idstage: stageId } });
+  await DemandeModificationStage.destroy({ where: { stage_idstage: stageId } });
+
+  // Documents liés au rapport du stage
+  const rapport = await RapportStage.findOne({ where: { stage_idstage: stageId } });
+  if (rapport) {
+    await DocumentStage.destroy({ where: { rapport_stage_idrapport: rapport.idrapport } });
+    await rapport.destroy();
+  }
+
+  // Documents liés directement au stage
+  await DocumentStage.destroy({ where: { stage_idstage: stageId } });
+
+  // Renouvellements (stageActuel ou stageNouveau)
+  await RenouvellementStage.destroy({
+    where: {
+      [Op.or]: [
+        { stage_actuel_idstage: stageId },
+        { stage_nouveau_idstage: stageId },
+      ],
+    },
+  });
+
+  // Stages enfants (issus de renouvellements) — on délie le lien parent
+  await Stage.update({ stage_parent_idstage: null }, { where: { stage_parent_idstage: stageId } });
+
+  // Suppression définitive du stage
+  await stage.destroy();
+  return { deleted: true };
+};
+
 // =====================================================
 // APPROBATION DE STAGE
 // =====================================================
@@ -2201,6 +2417,7 @@ module.exports = {
   // Stages
   createStage,
   getAllStages,
+  getStagesArchives,
   getStagesStats,
   getDomainesDistincts,
   getStagesByCandidat,
@@ -2212,6 +2429,7 @@ module.exports = {
   exigerDocuments,
   resoumettreStage,
   deleteStage,
+  hardDeleteStage,
   mergeStageDocuments,
   downloadStageDocument,
   downloadConventionStage,
@@ -2222,6 +2440,8 @@ module.exports = {
   getAllRenouvellements,
   approuverRenouvellement,
   evaluateRenouvellement,
+  resoumettreRenouvellement,
+  rouvrirRenouvellement,
   downloadLettreRenouvellement,
   downloadConventionRenouvellement,
 

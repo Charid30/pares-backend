@@ -200,6 +200,9 @@ const evaluateRenouvellementSchema = Joi.object({
     }),
     otherwise: Joi.string().allow('', null),
   }),
+
+  lettreNonConforme: Joi.boolean().default(false),
+  conventionNonConforme: Joi.boolean().default(false),
 });
 
 /**
@@ -239,16 +242,11 @@ const evaluateRapportSchema = Joi.object({
       'any.only': 'Statut invalide',
     }),
   
-  noteRapport: Joi.number()
-    .min(0)
-    .max(20)
-    .allow(null)
-    .messages({
-      'number.min': 'La note doit être au moins 0',
-      'number.max': 'La note ne peut pas dépasser 20',
-    }),
-  
-  commentaireEvaluateur: Joi.string().allow('', null),
+  commentaireEvaluateur: Joi.string().trim().min(1).required().messages({
+    'any.required': 'Le commentaire est requis',
+    'string.empty': 'Le commentaire ne peut pas être vide',
+    'string.min': 'Le commentaire ne peut pas être vide',
+  }),
   
   motifRefus: Joi.when('statusRapport', {
     is: 'REFUSE',
