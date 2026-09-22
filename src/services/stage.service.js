@@ -1190,14 +1190,16 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
   if (data.statusRenouvellement === 'ACCEPTE') {
     const stageActuelDateFin = renouvellement.stageActuel?.dateFinEffective;
 
-    let dateDebutEffectiveNouveau = null;
-    let dateFinEffectiveNouveau = null;
+    let dateDebutEffectiveNouveau = data.dateDebutEffective || null;
+    let dateFinEffectiveNouveau = data.dateFinEffective || null;
 
-    if (stageActuelDateFin) {
+    // Auto-calculer seulement si l'admin n'a pas fourni les dates manuellement
+    if (!dateDebutEffectiveNouveau && stageActuelDateFin) {
       const lendemain = new Date(stageActuelDateFin);
       lendemain.setDate(lendemain.getDate() + 1);
       dateDebutEffectiveNouveau = lendemain.toISOString().split('T')[0];
-
+    }
+    if (dateDebutEffectiveNouveau && !dateFinEffectiveNouveau) {
       dateFinEffectiveNouveau = calculerDateFin(
         dateDebutEffectiveNouveau,
         renouvellement.dureeDemandee
@@ -1214,6 +1216,19 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
     }
 
     await renouvellement.stageNouveau.update(updateData);
+
+    // Si une convention existe déjà dans document_stage pour ce nouveau stage,
+    // passer directement EN_COURS sans attendre un nouvel upload.
+    const conventionExistante = await DocumentStage.findOne({
+      where: {
+        stage_idstage: renouvellement.stageNouveau.idstage,
+        typeDocument: 'CONVENTION',
+        del: 0,
+      },
+    });
+    if (conventionExistante) {
+      await renouvellement.stageNouveau.update({ statusStage: 'EN_COURS' });
+    }
 
   } else if (data.statusRenouvellement === 'REJETE') {
     await renouvellement.stageNouveau.update({

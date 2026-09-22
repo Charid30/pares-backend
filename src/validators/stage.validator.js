@@ -203,6 +203,20 @@ const evaluateRenouvellementSchema = Joi.object({
 
   lettreNonConforme: Joi.boolean().default(false),
   conventionNonConforme: Joi.boolean().default(false),
+
+  dateDebutEffective: Joi.when('statusRenouvellement', {
+    is: 'ACCEPTE',
+    then: Joi.date().optional().allow(null),
+    otherwise: Joi.forbidden(),
+  }),
+  dateFinEffective: Joi.when('statusRenouvellement', {
+    is: 'ACCEPTE',
+    then: Joi.date().optional().allow(null).when('dateDebutEffective', {
+      is: Joi.date().exist(),
+      then: Joi.date().min(Joi.ref('dateDebutEffective')),
+    }),
+    otherwise: Joi.forbidden(),
+  }),
 });
 
 /**
