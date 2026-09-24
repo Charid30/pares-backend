@@ -579,25 +579,8 @@ const createDocumentStage = async (req, res) => {
     if (!req.file) {
       return error(res, 'Le fichier PDF est requis', 400);
     }
-    
-    // Récupérer l'agent ID depuis le user
-    const agent = await require('../models').Agent.findOne({
-      include: [{
-        model: require('../models').User,
-        as: 'users',
-        where: { idusers: req.user.id },
-      }],
-    });
-    
-    if (!agent) {
-      return error(res, 'Agent non trouvé', 404);
-    }
-    
-    const document = await stageService.createDocumentStage(
-      agent.idagents,
-      req.body,
-      req.file
-    );
+    const agentId = req.user.agentId || null;
+    const document = await stageService.createDocumentStage(agentId, req.body, req.file);
     return success(res, document, 'Document créé avec succès', 201);
   } catch (err) {
     return error(res, err.message, 400);

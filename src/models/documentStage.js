@@ -18,7 +18,7 @@ module.exports = (sequelize) => {
     },
     agents_idagents: {
       type: DataTypes.INTEGER,
-      allowNull: false,
+      allowNull: true,
     },
     typeDocument: {
       type: DataTypes.ENUM('CONVENTION', 'ATTESTATION'),
