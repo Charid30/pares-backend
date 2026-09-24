@@ -439,6 +439,26 @@ router.get('/directions', authenticate, async (req, res) => {
 });
 
 /**
+ * @route   GET /api/stages/agents-liste
+ * @desc    Liste des agents actifs (pour le combobox "maître de stage")
+ * @access  Private (module STAGE)
+ */
+router.get('/agents-liste', authenticate, authorizeModule('STAGE'), async (req, res) => {
+  try {
+    const { Agent } = require('../models');
+    const agents = await Agent.findAll({
+      where: { del: 0, actif: true },
+      attributes: ['idagents', 'nom', 'prenom', 'matricule'],
+      order: [['nom', 'ASC'], ['prenom', 'ASC']],
+    });
+    return res.json({ success: true, data: agents });
+  } catch (err) {
+    console.error('GET /stages/agents-liste error:', err);
+    return res.status(500).json({ success: false, message: 'Erreur lors du chargement des agents' });
+  }
+});
+
+/**
  * @route   GET /api/stages/export
  * @desc    Exporter les stages en CSV (filtres: statusStage, typeStage)
  * @access  Private (ADMIN, agents avec module STAGE)
