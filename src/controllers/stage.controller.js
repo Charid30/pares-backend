@@ -952,7 +952,8 @@ const approuverStage = async (req, res) => {
       req.params.id,
       req.user.username,
       getAgentContext(req.user),
-      req.body.dateDebutProposee || null
+      req.body.dateDebutProposee || null,
+      req.body.nomMaitreStage || null
     );
     await auditService.log({
       agentId:  req.user.agentId,
@@ -966,6 +967,7 @@ const approuverStage = async (req, res) => {
         prenom: stage.candidat?.prenom || null,
         statusStage: 'PROGRAMMATION_EN_COURS',
         dateDebutProposee: req.body.dateDebutProposee || null,
+        nomMaitreStage: req.body.nomMaitreStage || null,
       },
       ip: req.ip,
     });

@@ -354,6 +354,11 @@ const transfererStageSchema = Joi.object({
  * (jours officiels de démarrage des stages).
  */
 const approuverStageSchema = Joi.object({
+  nomMaitreStage: Joi.string().trim().min(2).max(150).required().messages({
+    'any.required': 'Le nom du maître de stage est obligatoire',
+    'string.empty': 'Le nom du maître de stage est obligatoire',
+    'string.min': 'Le nom du maître de stage doit contenir au moins 2 caractères',
+  }),
   dateDebutProposee: Joi.date().optional().allow(null, '').custom((value, helpers) => {
     const jour = new Date(value).getUTCDate();
     if (jour !== 1 && jour !== 15) {

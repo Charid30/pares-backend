@@ -148,6 +148,11 @@ module.exports = (sequelize) => {
       allowNull: true,
       comment: 'Date de début proposée par l\'agent lors de l\'approbation (1er ou 15 du mois uniquement)',
     },
+    nomMaitreStage: {
+      type: DataTypes.STRING(150),
+      allowNull: true,
+      comment: 'Nom du maître de stage renseigné lors de l\'approbation',
+    },
     dateFinEffective: {
       type: DataTypes.DATEONLY,
     },
