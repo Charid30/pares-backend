@@ -2116,7 +2116,7 @@ const hardDeleteStage = async (stageId) => {
  * @param {number} stageId
  * @param {string} agentUsername
  */
-const approuverStage = async (stageId, agentUsername, agentContext = null, dateDebutProposee = null) => {
+const approuverStage = async (stageId, agentUsername, agentContext = null, dateDebutProposee = null, nomMaitreStage = null) => {
   const stage = await Stage.findOne({
     where: { idstage: stageId, del: 0 },
     include: [
@@ -2138,6 +2138,7 @@ const approuverStage = async (stageId, agentUsername, agentContext = null, dateD
   await stage.update({
     statusStage: 'PROGRAMMATION_EN_COURS',
     dateDebutProposee: dateDebutProposee || null,
+    nomMaitreStage: nomMaitreStage || null,
     lastmodifiedDate: new Date(),
   });
 

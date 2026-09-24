@@ -579,25 +579,8 @@ const createDocumentStage = async (req, res) => {
     if (!req.file) {
       return error(res, 'Le fichier PDF est requis', 400);
     }
-    
-    // Récupérer l'agent ID depuis le user
-    const agent = await require('../models').Agent.findOne({
-      include: [{
-        model: require('../models').User,
-        as: 'users',
-        where: { idusers: req.user.id },
-      }],
-    });
-    
-    if (!agent) {
-      return error(res, 'Agent non trouvé', 404);
-    }
-    
-    const document = await stageService.createDocumentStage(
-      agent.idagents,
-      req.body,
-      req.file
-    );
+    const agentId = req.user.agentId || null;
+    const document = await stageService.createDocumentStage(agentId, req.body, req.file);
     return success(res, document, 'Document créé avec succès', 201);
   } catch (err) {
     return error(res, err.message, 400);
@@ -969,7 +952,8 @@ const approuverStage = async (req, res) => {
       req.params.id,
       req.user.username,
       getAgentContext(req.user),
-      req.body.dateDebutProposee || null
+      req.body.dateDebutProposee || null,
+      req.body.nomMaitreStage || null
     );
     await auditService.log({
       agentId:  req.user.agentId,
@@ -983,6 +967,7 @@ const approuverStage = async (req, res) => {
         prenom: stage.candidat?.prenom || null,
         statusStage: 'PROGRAMMATION_EN_COURS',
         dateDebutProposee: req.body.dateDebutProposee || null,
+        nomMaitreStage: req.body.nomMaitreStage || null,
       },
       ip: req.ip,
     });
