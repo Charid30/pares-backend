@@ -323,6 +323,44 @@ const resoumettreRenouvellement = async (req, res) => {
   }
 };
 
+const downloadLettreRenouvellementCandidat = async (req, res) => {
+  try {
+    const { RenouvellementStage, Stage } = require('../models');
+    const renouvellement = await RenouvellementStage.findOne({
+      where: { idrenouvellement: req.params.id, del: 0 },
+      include: [{ model: Stage, as: 'stageNouveau', attributes: ['candidats_idcandidats'] }],
+    });
+    if (!renouvellement) return error(res, 'Renouvellement non trouvé', 404);
+    if (renouvellement.stageNouveau?.candidats_idcandidats !== req.user.candidatId)
+      return error(res, 'Accès non autorisé', 403);
+    const document = await stageService.downloadLettreRenouvellement(req.params.id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${document.filename}"`);
+    res.send(document.buffer);
+  } catch (err) {
+    return error(res, err.message, 404);
+  }
+};
+
+const downloadConventionRenouvellementCandidat = async (req, res) => {
+  try {
+    const { RenouvellementStage, Stage } = require('../models');
+    const renouvellement = await RenouvellementStage.findOne({
+      where: { idrenouvellement: req.params.id, del: 0 },
+      include: [{ model: Stage, as: 'stageNouveau', attributes: ['candidats_idcandidats'] }],
+    });
+    if (!renouvellement) return error(res, 'Renouvellement non trouvé', 404);
+    if (renouvellement.stageNouveau?.candidats_idcandidats !== req.user.candidatId)
+      return error(res, 'Accès non autorisé', 403);
+    const document = await stageService.downloadConventionRenouvellement(req.params.id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${document.filename}"`);
+    res.send(document.buffer);
+  } catch (err) {
+    return error(res, err.message, 404);
+  }
+};
+
 module.exports = {
   // Profil
   getProfil,
@@ -340,4 +378,6 @@ module.exports = {
   getConventionPourRenouvellement,
   demanderRenouvellement,
   resoumettreRenouvellement,
+  downloadLettreRenouvellementCandidat,
+  downloadConventionRenouvellementCandidat,
 };
