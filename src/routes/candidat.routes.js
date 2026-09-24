@@ -150,4 +150,16 @@ router.put(
   candidatController.resoumettreRenouvellement
 );
 
+/**
+ * GET /api/candidat/renouvellements/:id/lettre
+ * Télécharger la lettre de renouvellement soumise par le candidat (accès propriétaire uniquement)
+ */
+router.get('/renouvellements/:id/lettre', candidatController.downloadLettreRenouvellementCandidat);
+
+/**
+ * GET /api/candidat/renouvellements/:id/convention
+ * Télécharger la convention du stage en cours jointe à la demande de renouvellement
+ */
+router.get('/renouvellements/:id/convention', candidatController.downloadConventionRenouvellementCandidat);
+
 module.exports = router;
