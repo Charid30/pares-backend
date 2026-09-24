@@ -25,6 +25,11 @@ const ALLOWED_SUBFOLDERS = new Set([
   'agents',
   'conventions',
   'temp',
+  'renouvellements',
+  'documents-stage',
+  'rapports',
+  'candidatures-aide',
+  'candidatures-offre',
 ]);
 
 /**
