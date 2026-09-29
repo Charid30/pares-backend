@@ -323,6 +323,24 @@ const downloadConventionStage = async (req, res) => {
   }
 };
 
+const remplacerConventionStage = async (req, res) => {
+  try {
+    const agentId = req.user.agentId || null;
+    const doc = await stageService.remplacerConventionStage(req.params.id, agentId, req.file);
+    await auditService.log({
+      userId: req.user.id,
+      action: 'REMPLACER_CONVENTION',
+      entity: 'stage',
+      entityId: req.params.id,
+      details: { filename: doc.document_filename },
+      ipAddress: req.ip,
+    });
+    return success(res, { iddocument: doc.iddocument }, 'Convention remplacée avec succès');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
 // =====================================================
 // SUIVI DES STAGES
 // =====================================================
@@ -1136,6 +1154,7 @@ module.exports = {
   printAllStageDocuments,
   downloadStageDocument,
   downloadConventionStage,
+  remplacerConventionStage,
   exportStages,
   exportStagesPDF,
 

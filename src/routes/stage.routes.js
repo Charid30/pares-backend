@@ -683,6 +683,20 @@ router.get(
 );
 
 /**
+ * @route   PUT /api/stages/:id/convention
+ * @desc    Remplacer la convention de stage (admin / agent avec permission CREER)
+ * @access  Private — permission CREER sur STAGE requise
+ */
+router.put(
+  '/:id/convention',
+  authenticate,
+  authorizeAction('STAGE', 'CREER'),
+  uploadConvention.single('conventionStage'),
+  validatePdfFiles,
+  stageController.remplacerConventionStage
+);
+
+/**
  * @route   PUT /api/stages/:id
  * @desc    Modifier un stage (dates effectives, commentaire)
  * @access  Private — permission MODIFIER sur STAGE requise
