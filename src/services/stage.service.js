@@ -1413,7 +1413,7 @@ const getAllRapports = async (filters = {}) => {
     where.statusRapport = filters.statusRapport;
   }
 
-  return await RapportStage.findAll({
+  const rapports = await RapportStage.findAll({
     where,
     // Exclure le BLOB du rapport pour des raisons de performance
     attributes: { exclude: ['rapportPdf'] },
@@ -1433,6 +1433,26 @@ const getAllRapports = async (filters = {}) => {
     ],
     order: [['createdDate', 'DESC']],
   });
+
+  // Calculer le cumul total de mois pour chaque candidat (TOUS ses stages, pas seulement ceux avec rapport)
+  const candidatIds = [...new Set(rapports.map(r => r.stage?.candidats_idcandidats).filter(Boolean))];
+  if (candidatIds.length > 0) {
+    const tousStages = await Stage.findAll({
+      where: { candidats_idcandidats: { [Op.in]: candidatIds }, del: 0 },
+      attributes: ['idstage', 'candidats_idcandidats', 'dureeStage'],
+    });
+    const cumulParCandidat = {};
+    for (const s of tousStages) {
+      const cid = s.candidats_idcandidats;
+      cumulParCandidat[cid] = (cumulParCandidat[cid] ?? 0) + (s.dureeStage ?? 0);
+    }
+    return rapports.map(r => {
+      const cid = r.stage?.candidats_idcandidats;
+      return { ...r.toJSON(), moisConsommes: cid !== undefined ? (cumulParCandidat[cid] ?? 0) : 0 };
+    });
+  }
+
+  return rapports.map(r => ({ ...r.toJSON(), moisConsommes: 0 }));
 };
 
 /**
