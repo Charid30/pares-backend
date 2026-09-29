@@ -173,7 +173,7 @@ const createStage = async (candidatId, data, files) => {
  *   Si absent ou isSystemRole=true, tous les stages sont retournés.
  */
 const getAllStages = async (filters = {}, agentContext = null) => {
-  const { page = 1, limit = 10, statusStage, excludeStatus, typeStage, domaineStage, directionId, search } = filters;
+  const { page = 1, limit = 10, statusStage, excludeStatus, typeStage, domaineStage, directionId, search, moisPropose } = filters;
   const offset = (page - 1) * limit;
 
   const where = { del: 0, stage_parent_idstage: null };
@@ -207,6 +207,14 @@ const getAllStages = async (filters = {}, agentContext = null) => {
 
   if (directionId) {
     where.direction_iddirection = parseInt(directionId, 10);
+  }
+
+  // Filtre par mois proposé (format YYYY-MM)
+  if (moisPropose && /^\d{4}-\d{2}$/.test(moisPropose)) {
+    const [annee, mois] = moisPropose.split('-').map(Number);
+    const debut = new Date(annee, mois - 1, 1);
+    const fin = new Date(annee, mois, 1);
+    where.dateDebutProposee = { [Op.gte]: debut, [Op.lt]: fin };
   }
 
   // Directions de l'agent — utilisées pour filtrer la liste (rôle non-système)
