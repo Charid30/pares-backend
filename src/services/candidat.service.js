@@ -667,12 +667,15 @@ const soumettreRapportStage = async (candidatId, stageId, data, file) => {
   if (!file?.buffer) throw new Error('Le fichier du rapport est obligatoire');
 
   try {
+    const rapportPath = fileStorage.saveFile(file.buffer, file.originalname, 'rapports');
+
     // Créer le rapport lié à la racine de la chaîne
     const rapport = await RapportStage.create({
       stage_idstage: root.idstage,
       titreRapport: data.titreRapport,
       natureRapport: data.natureRapport || 'RAPPORT_STAGE',
-      rapportPdf: file.buffer,
+      rapportPdf: null,
+      rapportPdf_path: rapportPath,
       rapportPdf_filename: file.originalname,
       rapportPdf_size: file.size,
       statusRapport: 'SOUMIS',
