@@ -943,6 +943,49 @@ const downloadStageDocument = async (id, documentType, user = null) => {
 };
 
 /**
+ * Remplacer la convention de stage existante par une nouvelle version
+ */
+const remplacerConventionStage = async (stageId, agentId, file) => {
+  if (!file) throw new Error('Le fichier PDF est requis');
+
+  const stage = await Stage.findOne({ where: { idstage: stageId, del: 0 } });
+  if (!stage) throw new Error('Stage non trouvé');
+
+  const ancienneConvention = await DocumentStage.findOne({
+    where: { stage_idstage: stageId, typeDocument: 'CONVENTION', del: 0 },
+  });
+
+  const nouveauPath = fileStorage.saveFile(file.buffer, file.originalname, 'documents-stage');
+
+  if (ancienneConvention) {
+    // Supprimer l'ancien fichier disque si possible (non bloquant)
+    try { fileStorage.deleteFile(ancienneConvention.document_path); } catch (_) {}
+    await ancienneConvention.update({
+      agents_idagents: agentId,
+      document: null,
+      document_path: nouveauPath,
+      document_filename: file.originalname,
+      document_size: file.size,
+      dateEmission: new Date(),
+    });
+    return ancienneConvention;
+  }
+
+  // Aucune convention existante → on en crée une nouvelle
+  const doc = await DocumentStage.create({
+    stage_idstage: stageId,
+    agents_idagents: agentId,
+    typeDocument: 'CONVENTION',
+    document: null,
+    document_path: nouveauPath,
+    document_filename: file.originalname,
+    document_size: file.size,
+    dateEmission: new Date(),
+  });
+  return doc;
+};
+
+/**
  * Telecharger la convention de stage (depuis document_stage)
  */
 const downloadConventionStage = async (stageId, user = null) => {
@@ -2449,6 +2492,7 @@ module.exports = {
   mergeStageDocuments,
   downloadStageDocument,
   downloadConventionStage,
+  remplacerConventionStage,
   hasConvention,
 
   // Renouvellements
