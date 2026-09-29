@@ -23,7 +23,7 @@ module.exports = (sequelize) => {
     },
     rapportPdf: {
       type: DataTypes.BLOB('medium'),
-      allowNull: false,
+      allowNull: true,
     },
     rapportPdf_filename: {
       type: DataTypes.STRING(255),
