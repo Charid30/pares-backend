@@ -73,10 +73,6 @@ module.exports = (sequelize) => {
       defaultValue: 0,
       comment: '1 si ce renouvellement a été re-soumis après un rejet — seul l\'admin peut le traiter',
     },
-    createdDate: {
-      type: DataTypes.DATE,
-      defaultValue: DataTypes.NOW,
-    },
     createdBy: {
       type: DataTypes.STRING(255),
       allowNull: true,

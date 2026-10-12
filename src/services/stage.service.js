@@ -1140,9 +1140,19 @@ const getAllRenouvellements = async (filters = {}) => {
     ];
   }
 
+  const RENOUV_ATTRS = [
+    'idrenouvellement', 'stage_actuel_idstage', 'stage_nouveau_idstage',
+    'lettreMotivationRenouvellement_filename', 'lettreMotivationRenouvellement_size', 'lettreMotivationRenouvellement_path',
+    'conventionStageEnCours_filename', 'conventionStageEnCours_size', 'conventionStageEnCours_path',
+    'dureeDemandee', 'statusRenouvellement', 'motifRefus', 'dateRenouvellement',
+    'lettreNonConforme', 'conventionNonConforme', 'resoumis',
+    'createdBy', 'lastModifiedDate', 'lastModifiedBy',
+    'deletedDate', 'deletedBy', 'del',
+  ];
+
   const { count, rows } = await RenouvellementStage.findAndCountAll({
     where,
-    attributes: { exclude: ['lettreMotivationRenouvellement', 'conventionStageEnCours'] },
+    attributes: RENOUV_ATTRS,
     include: [
       {
         model: Stage,
