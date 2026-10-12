@@ -948,14 +948,9 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Récupérer la convention existante depuis document_stage
-  const conventionDoc = await DocumentStage.findOne({
-    where: {
-      stage_idstage: stageId,
-      typeDocument: 'CONVENTION',
-      del: 0,
-    },
-  });
+  // Ne pas copier la convention du stage parent — la convention du renouvellement
+  // sera celle que l'admin uploadera lors de l'acceptation (document_stage du stage_nouveau).
+  const conventionDoc = null;
 
   const dureeDemandee = parseInt(data.dureeDemandee) || stage.dureeStage;
 
