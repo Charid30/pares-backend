@@ -388,6 +388,7 @@ const getAllRenouvellements = async (req, res) => {
     const renouvellements = await stageService.getAllRenouvellements(req.query);
     return success(res, renouvellements, 'Renouvellements récupérés avec succès');
   } catch (err) {
+    console.error('[getAllRenouvellements] ERREUR:', err.message);
     return error(res, err.message, 500);
   }
 };
