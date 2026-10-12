@@ -19,24 +19,6 @@ const fileStorage = require('../utils/fileStorage.util');
 const { calculerDateFin, calculerPeutAgir, calculerDureeEtRepos } = require('../utils/stageCalculs.util');
 
 /**
- * Ajoute un événement dans l'historique JSON d'un renouvellement.
- * @param {object} renouvInstance  - instance Sequelize RenouvellementStage
- * @param {string} statut          - nouveau statut
- * @param {string} auteur          - nom affiché de l'acteur
- * @param {string|null} note       - motif / commentaire optionnel
- */
-const pushHistorique = async (renouvInstance, statut, auteur, note = null) => {
-  try {
-    let hist = [];
-    if (renouvInstance.historiqueJson) {
-      try { hist = JSON.parse(renouvInstance.historiqueJson); } catch (_) { hist = []; }
-    }
-    hist.push({ date: new Date().toISOString(), statut, auteur, note });
-    await renouvInstance.update({ historiqueJson: JSON.stringify(hist) });
-  } catch (_) { /* non-bloquant */ }
-};
-
-/**
  * Vérifie qu'un agent non-système a le droit d'agir sur une direction donnée.
  * Protège les endpoints d'action (approuver/valider/rejeter/évaluer) contre
  * un agent qui verrait un stage hors de sa direction (ex: via un rôle de
@@ -1252,9 +1234,12 @@ const approuverRenouvellement = async (id, agentContext = null) => {
 
   await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
 
-  await renouvellement.update({ statusRenouvellement: 'PROGRAMMATION_EN_COURS' });
   const agentNomApprouver = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Agent';
-  await pushHistorique(renouvellement, 'PROGRAMMATION_EN_COURS', agentNomApprouver);
+  await renouvellement.update({
+    statusRenouvellement: 'PROGRAMMATION_EN_COURS',
+    lastModifiedBy: agentNomApprouver,
+    lastModifiedDate: new Date(),
+  });
 
   // Notification au candidat
   try {
@@ -1333,12 +1318,15 @@ const expirerRenouvellement = async (id, agentContext = null) => {
     throw new Error(`Impossible d'expirer un renouvellement en statut ${renouvellement.statusRenouvellement}`);
   }
 
-  await renouvellement.update({ statusRenouvellement: 'EXPIRE' });
+  const nomExpireur = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
+  await renouvellement.update({
+    statusRenouvellement: 'EXPIRE',
+    lastModifiedBy: nomExpireur,
+    lastModifiedDate: new Date(),
+  });
   if (renouvellement.stageNouveau?.statusStage === 'EN_COURS') {
     await renouvellement.stageNouveau.update({ statusStage: 'EXPIRE' });
   }
-  const nom = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
-  await pushHistorique(renouvellement, 'EXPIRE', nom, 'Expiration manuelle');
   return renouvellement;
 };
 
@@ -1424,9 +1412,12 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
 
   await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
 
-  await renouvellement.update(data);
   const agentNomEval = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
-  await pushHistorique(renouvellement, data.statusRenouvellement, agentNomEval, data.motifRefus || null);
+  await renouvellement.update({
+    ...data,
+    lastModifiedBy: agentNomEval,
+    lastModifiedDate: new Date(),
+  });
 
   if (data.statusRenouvellement === 'ACCEPTE') {
     const stageActuelDateFin = renouvellement.stageActuel?.dateFinEffective;
@@ -1554,8 +1545,11 @@ const resoumettreRenouvellement = async (id, candidatId, files = {}) => {
     updateData.conventionStageEnCours_size = files.convention.size;
   }
 
-  await renouvellement.update(updateData);
-  await pushHistorique(renouvellement, 'EN_ATTENTE', 'Candidat', 'Re-soumission après rejet');
+  await renouvellement.update({
+    ...updateData,
+    lastModifiedBy: 'Candidat',
+    lastModifiedDate: new Date(),
+  });
 
   // Remettre le stage associé en EN_ATTENTE
   await renouvellement.stageNouveau.update({

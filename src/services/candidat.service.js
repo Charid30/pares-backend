@@ -1017,11 +1017,7 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
     await autorisationActive.update({ usedAt: new Date() });
   }
 
-  // Tracer la création dans l'historique
-  try {
-    const hist = [{ date: new Date().toISOString(), statut: 'EN_ATTENTE', auteur: 'Candidat', note: 'Demande soumise' }];
-    await renouvellementCreated.update({ historiqueJson: JSON.stringify(hist) });
-  } catch (_) { /* non-bloquant */ }
+  await renouvellementCreated.update({ createdBy: 'Candidat' });
 
   return {
     idstage: nouveauStage.idstage,
@@ -1072,7 +1068,8 @@ const getMesRenouvellements = async (candidatId) => {
     where: { del: 0 },
     attributes: [
       'idrenouvellement', 'statusRenouvellement', 'motifRefus',
-      'dureeDemandee', 'dateRenouvellement', 'historiqueJson',
+      'dureeDemandee', 'dateRenouvellement',
+      'createdBy', 'lastModifiedBy', 'lastModifiedDate',
     ],
     include: [
       {
@@ -1098,7 +1095,9 @@ const getMesRenouvellements = async (candidatId) => {
     motifRefus: r.motifRefus,
     dureeDemandee: r.dureeDemandee,
     dateRenouvellement: r.dateRenouvellement,
-    historique: (() => { try { return r.historiqueJson ? JSON.parse(r.historiqueJson) : []; } catch (_) { return []; } })(),
+    createdBy: r.createdBy,
+    lastModifiedBy: r.lastModifiedBy,
+    lastModifiedDate: r.lastModifiedDate,
     stageActuel: r.stageActuel ? {
       idstage: r.stageActuel.idstage,
       domaine: r.stageActuel.domaineStage,

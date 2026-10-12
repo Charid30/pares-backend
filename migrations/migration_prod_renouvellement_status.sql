@@ -1,11 +1,12 @@
 -- =============================================================================
--- Migration : extension de l'ENUM statusRenouvellement
--- Ajoute : EN_COURS, EXPIRE, TERMINE, RAPPORT_SOUMIS
--- Ajoute : colonne historiqueJson pour l'audit trail
+-- Migration : extension de l'ENUM statusRenouvellement + champs d'audit
+-- Ajoute les statuts : EN_COURS, EXPIRE, TERMINE, RAPPORT_SOUMIS
+-- Ajoute les champs d'audit : createdBy, lastModifiedDate, lastModifiedBy,
+--                             deletedDate, deletedBy
 -- =============================================================================
 -- SÉCURITÉ :
 --   - MODIFY COLUMN ENUM ajoute des valeurs en fin de liste → AUCUNE donnée perdue
---   - ALTER TABLE ... ADD COLUMN ajoute une colonne nullable → AUCUNE donnée affectée
+--   - ADD COLUMN IF NOT EXISTS ajoute des colonnes nullables → AUCUNE donnée affectée
 --   - MySQL reconstruira la table (bref verrou), sur une petite table c'est quasi-instantané
 -- =============================================================================
 
@@ -24,13 +25,13 @@ ALTER TABLE `renouvellement_stage`
     )
     NOT NULL DEFAULT 'EN_ATTENTE';
 
--- Étape 2 : ajouter la colonne audit trail (nullable, aucun impact sur l'existant)
+-- Étape 2 : ajouter les champs d'audit (nullable, aucun impact sur l'existant)
 ALTER TABLE `renouvellement_stage`
-  ADD COLUMN IF NOT EXISTS `historiqueJson` TEXT NULL
-    COMMENT 'JSON array [{date, statut, auteur, note}] — journal des changements de statut';
+  ADD COLUMN IF NOT EXISTS `createdBy`        VARCHAR(255) NULL,
+  ADD COLUMN IF NOT EXISTS `lastModifiedDate` DATETIME     NULL,
+  ADD COLUMN IF NOT EXISTS `lastModifiedBy`   VARCHAR(255) NULL,
+  ADD COLUMN IF NOT EXISTS `deletedDate`      DATETIME     NULL,
+  ADD COLUMN IF NOT EXISTS `deletedBy`        VARCHAR(255) NULL;
 
--- Vérification finale : lister les valeurs de l'ENUM
--- SELECT COLUMN_TYPE FROM information_schema.COLUMNS
---   WHERE TABLE_SCHEMA = DATABASE()
---     AND TABLE_NAME   = 'renouvellement_stage'
---     AND COLUMN_NAME  = 'statusRenouvellement';
+-- Vérification finale : structure de la table
+-- DESCRIBE renouvellement_stage;

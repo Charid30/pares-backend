@@ -73,10 +73,29 @@ module.exports = (sequelize) => {
       defaultValue: 0,
       comment: '1 si ce renouvellement a été re-soumis après un rejet — seul l\'admin peut le traiter',
     },
-    historiqueJson: {
-      type: DataTypes.TEXT,
+    createdDate: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
+    createdBy: {
+      type: DataTypes.STRING(255),
       allowNull: true,
-      comment: 'JSON array [{date, statut, auteur, note}]',
+    },
+    lastModifiedDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    lastModifiedBy: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+    deletedDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    deletedBy: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
     },
     del: {
       type: DataTypes.TINYINT,
