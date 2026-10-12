@@ -1333,7 +1333,7 @@ const expirerRenouvellement = async (id, agentContext = null) => {
 /**
  * Annuler l'approbation d'un renouvellement (PROGRAMMATION_EN_COURS → EN_ATTENTE) — admin uniquement.
  */
-const annulerApprobationRenouvellement = async (id) => {
+const annulerApprobationRenouvellement = async (id, agentContext = null) => {
   const renouvellement = await RenouvellementStage.findOne({
     where: { idrenouvellement: id, del: 0 },
     include: [{ model: Stage, as: 'stageNouveau', attributes: ['idstage', 'statusStage'] }],
@@ -1344,7 +1344,12 @@ const annulerApprobationRenouvellement = async (id) => {
     throw new Error(`Seul un renouvellement approuvé peut être annulé (statut actuel : ${renouvellement.statusRenouvellement})`);
   }
 
-  await renouvellement.update({ statusRenouvellement: 'EN_ATTENTE' });
+  const nomAgent = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
+  await renouvellement.update({
+    statusRenouvellement: 'EN_ATTENTE',
+    lastModifiedBy: nomAgent,
+    lastModifiedDate: new Date(),
+  });
   await renouvellement.stageNouveau.update({ statusStage: 'EN_ATTENTE' });
 
   return renouvellement.reload();
@@ -1354,7 +1359,7 @@ const annulerApprobationRenouvellement = async (id) => {
  * Supprimer (soft delete) un renouvellement — admin uniquement.
  * Supprime aussi le nouveau stage associé (s'il est encore EN_ATTENTE ou PROGRAMMATION_EN_COURS).
  */
-const supprimerRenouvellement = async (id) => {
+const supprimerRenouvellement = async (id, agentContext = null) => {
   const renouvellement = await RenouvellementStage.findOne({
     where: { idrenouvellement: id, del: 0 },
     include: [{ model: Stage, as: 'stageNouveau', attributes: ['idstage', 'statusStage'] }],
@@ -1367,7 +1372,12 @@ const supprimerRenouvellement = async (id) => {
     throw new Error(`Un renouvellement ${renouvellement.statusRenouvellement} ne peut pas être supprimé`);
   }
 
-  await renouvellement.update({ del: 1 });
+  const nomAgent = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
+  await renouvellement.update({
+    del: 1,
+    deletedBy: nomAgent,
+    deletedDate: new Date(),
+  });
 
   if (renouvellement.stageNouveau &&
       ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS'].includes(renouvellement.stageNouveau.statusStage)) {

@@ -1,7 +1,8 @@
 // src/jobs/stageStatusJob.js
 // Job pour mettre a jour automatiquement les statuts des stages
-const { Stage, RenouvellementStage } = require('../models');
+const { Stage, RenouvellementStage, Candidat } = require('../models');
 const { Op } = require('sequelize');
+const emailService = require('../services/email.service');
 
 /**
  * Met a jour les stages ACCEPTE vers EN_COURS quand la dateDebutEffective est atteinte
@@ -78,27 +79,52 @@ const expirerStagesEnCours = async () => {
 /**
  * Synchronise les statuts des renouvellements d'après le statut réel du stageNouveau.
  * EN_COURS/EXPIRE/TERMINE sur le stage → même statut sur le renouvellement.
+ * Envoie un email au candidat pour chaque transition.
  */
 const syncRenouvellementStatuses = async () => {
   const SYNC = [
-    { stageStatus: 'EN_COURS',  renewalStatus: 'EN_COURS',  fromStatuses: ['ACCEPTE'] },
-    { stageStatus: 'EXPIRE',    renewalStatus: 'EXPIRE',    fromStatuses: ['EN_COURS', 'ACCEPTE'] },
-    { stageStatus: 'TERMINE',   renewalStatus: 'TERMINE',   fromStatuses: ['EN_COURS', 'ACCEPTE'] },
-    { stageStatus: 'RAPPORT_SOUMIS', renewalStatus: 'TERMINE', fromStatuses: ['EN_COURS', 'ACCEPTE'] },
+    { stageStatus: 'EN_COURS',       renewalStatus: 'EN_COURS', fromStatuses: ['ACCEPTE'],              emailFn: 'sendRenouvellementEnCoursEmail' },
+    { stageStatus: 'EXPIRE',         renewalStatus: 'EXPIRE',   fromStatuses: ['EN_COURS', 'ACCEPTE'],  emailFn: 'sendRenouvellementExpireEmail' },
+    { stageStatus: 'TERMINE',        renewalStatus: 'TERMINE',  fromStatuses: ['EN_COURS', 'ACCEPTE'],  emailFn: 'sendRenouvellementTermineEmail' },
+    { stageStatus: 'RAPPORT_SOUMIS', renewalStatus: 'TERMINE',  fromStatuses: ['EN_COURS', 'ACCEPTE'],  emailFn: 'sendRenouvellementTermineEmail' },
   ];
 
   let total = 0;
   try {
-    for (const { stageStatus, renewalStatus, fromStatuses } of SYNC) {
-      const stages = await Stage.findAll({
-        where: { statusStage: stageStatus, del: 0 },
-        attributes: ['idstage'],
+    for (const { stageStatus, renewalStatus, fromStatuses, emailFn } of SYNC) {
+      // 1. Trouver les renouvellements qui vont changer (avant update)
+      const toUpdate = await RenouvellementStage.findAll({
+        where: { statusRenouvellement: { [Op.in]: fromStatuses }, del: 0 },
+        attributes: ['idrenouvellement', 'dureeDemandee', 'stage_nouveau_idstage'],
+        include: [
+          {
+            model: Stage,
+            as: 'stageNouveau',
+            required: true,
+            where: { statusStage: stageStatus, del: 0 },
+            attributes: ['idstage', 'domaineStage', 'dateDebutEffective', 'dateFinEffective'],
+            include: [
+              {
+                model: Candidat,
+                as: 'candidat',
+                attributes: ['idcandidats', 'nom', 'prenom', 'email'],
+              },
+            ],
+          },
+        ],
       });
-      const ids = stages.map(s => s.idstage);
-      if (!ids.length) continue;
 
+      if (!toUpdate.length) continue;
+
+      const ids = toUpdate.map(r => r.stage_nouveau_idstage);
+
+      // 2. Mise à jour en masse avec audit
       const [count] = await RenouvellementStage.update(
-        { statusRenouvellement: renewalStatus },
+        {
+          statusRenouvellement: renewalStatus,
+          lastModifiedBy: 'Système',
+          lastModifiedDate: new Date(),
+        },
         {
           where: {
             stage_nouveau_idstage: { [Op.in]: ids },
@@ -108,6 +134,21 @@ const syncRenouvellementStatuses = async () => {
         }
       );
       total += count;
+
+      // 3. Emails asynchrones (non bloquants)
+      for (const renouv of toUpdate) {
+        const candidat = renouv.stageNouveau?.candidat;
+        if (!candidat?.email) continue;
+        const payload = {
+          domaine: renouv.stageNouveau?.domaineStage,
+          dureeDemandee: renouv.dureeDemandee,
+          dateDebut: renouv.stageNouveau?.dateDebutEffective,
+          dateFin: renouv.stageNouveau?.dateFinEffective,
+        };
+        emailService[emailFn](candidat, payload).catch(e =>
+          console.error(`[CRON] Email ${emailFn} failed:`, e.message)
+        );
+      }
     }
 
     if (total > 0) {

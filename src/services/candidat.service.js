@@ -1070,6 +1070,8 @@ const getMesRenouvellements = async (candidatId) => {
       'idrenouvellement', 'statusRenouvellement', 'motifRefus',
       'dureeDemandee', 'dateRenouvellement',
       'createdBy', 'lastModifiedBy', 'lastModifiedDate',
+      'lettreNonConforme', 'conventionNonConforme',
+      'lettreMotivationRenouvellement_filename', 'conventionStageEnCours_filename',
     ],
     include: [
       {
@@ -1098,6 +1100,10 @@ const getMesRenouvellements = async (candidatId) => {
     createdBy: r.createdBy,
     lastModifiedBy: r.lastModifiedBy,
     lastModifiedDate: r.lastModifiedDate,
+    lettreNonConforme: r.lettreNonConforme,
+    conventionNonConforme: r.conventionNonConforme,
+    lettreMotivationFilename: r.lettreMotivationRenouvellement_filename,
+    conventionFilename: r.conventionStageEnCours_filename,
     stageActuel: r.stageActuel ? {
       idstage: r.stageActuel.idstage,
       domaine: r.stageActuel.domaineStage,

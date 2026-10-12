@@ -991,7 +991,7 @@ const expirerRenouvellement = async (req, res) => {
 
 const annulerApprobationRenouvellement = async (req, res) => {
   try {
-    const result = await stageService.annulerApprobationRenouvellement(req.params.id);
+    const result = await stageService.annulerApprobationRenouvellement(req.params.id, req.user);
     await auditService.log({
       agentId:  req.user.agentId,
       agentNom: req.user.username,
@@ -1009,7 +1009,7 @@ const annulerApprobationRenouvellement = async (req, res) => {
 
 const supprimerRenouvellement = async (req, res) => {
   try {
-    await stageService.supprimerRenouvellement(req.params.id);
+    await stageService.supprimerRenouvellement(req.params.id, req.user);
     await auditService.log({
       agentId:  req.user.agentId,
       agentNom: req.user.username,
