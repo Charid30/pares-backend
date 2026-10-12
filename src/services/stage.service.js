@@ -1170,6 +1170,13 @@ const getAllRenouvellements = async (filters = {}) => {
         model: Stage,
         as: 'stageNouveau',
         attributes: ['idstage', 'statusStage', 'dateDebutEffective', 'dateFinEffective'],
+        include: [{
+          model: DocumentStage,
+          as: 'documents',
+          where: { typeDocument: 'CONVENTION', del: 0 },
+          required: false,
+          attributes: ['document_filename'],
+        }],
       },
     ],
     order: [['dateRenouvellement', 'DESC']],
@@ -1967,35 +1974,32 @@ const downloadLettreRenouvellement = async (renouvellementId) => {
 const downloadConventionRenouvellement = async (renouvellementId) => {
   const renouvellement = await RenouvellementStage.findOne({
     where: { idrenouvellement: renouvellementId, del: 0 },
-    attributes: ['idrenouvellement', 'stage_actuel_idstage', 'conventionStageEnCours', 'conventionStageEnCours_path', 'conventionStageEnCours_filename', 'conventionStageEnCours_size'],
+    attributes: ['idrenouvellement', 'stage_nouveau_idstage'],
   });
 
   if (!renouvellement) {
     throw new Error('Demande de renouvellement non trouvée');
   }
 
-  // Essayer d'abord ce qui est stocké dans renouvellement_stage (path ou BLOB)
-  let buffer = fileStorage.readFile(renouvellement.conventionStageEnCours_path, renouvellement.conventionStageEnCours);
+  // La convention du renouvellement est celle que l'admin uploade pour le nouveau stage
+  const conventionDoc = await DocumentStage.findOne({
+    where: { stage_idstage: renouvellement.stage_nouveau_idstage, typeDocument: 'CONVENTION', del: 0 },
+    attributes: ['document', 'document_path', 'document_filename'],
+  });
 
-  // Fallback : si le buffer est vide (anciens enregistrements créés avant la migration vers disque),
-  // on va chercher la convention directement dans document_stage du stage parent
-  if (!buffer || buffer.length === 0) {
-    const conventionDoc = await DocumentStage.findOne({
-      where: { stage_idstage: renouvellement.stage_actuel_idstage, typeDocument: 'CONVENTION', del: 0 },
-      attributes: ['document', 'document_path', 'document_filename'],
-    });
-    if (conventionDoc) {
-      buffer = fileStorage.readFile(conventionDoc.document_path, conventionDoc.document);
-    }
+  if (!conventionDoc) {
+    throw new Error('Aucune convention disponible pour ce renouvellement');
   }
 
+  const buffer = fileStorage.readFile(conventionDoc.document_path, conventionDoc.document);
+
   if (!buffer || buffer.length === 0) {
-    throw new Error('Aucune convention disponible pour cette demande de renouvellement');
+    throw new Error('Fichier convention introuvable');
   }
 
   return {
     buffer,
-    filename: renouvellement.conventionStageEnCours_filename || `convention_renouvellement_${renouvellementId}.pdf`,
+    filename: conventionDoc.document_filename || `convention_renouvellement_${renouvellementId}.pdf`,
   };
 };
 
