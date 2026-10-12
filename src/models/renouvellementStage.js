@@ -48,7 +48,7 @@ module.exports = (sequelize) => {
       comment: 'En mois',
     },
     statusRenouvellement: {
-      type: DataTypes.ENUM('EN_ATTENTE', 'PROGRAMMATION_EN_COURS', 'ACCEPTE', 'REJETE'),
+      type: DataTypes.ENUM('EN_ATTENTE', 'PROGRAMMATION_EN_COURS', 'ACCEPTE', 'REJETE', 'EN_COURS', 'EXPIRE', 'TERMINE', 'RAPPORT_SOUMIS'),
       defaultValue: 'EN_ATTENTE',
     },
     motifRefus: {
@@ -72,6 +72,30 @@ module.exports = (sequelize) => {
       type: DataTypes.TINYINT,
       defaultValue: 0,
       comment: '1 si ce renouvellement a été re-soumis après un rejet — seul l\'admin peut le traiter',
+    },
+    createdDate: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
+    createdBy: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+    lastModifiedDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    lastModifiedBy: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+    deletedDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    deletedBy: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
     },
     del: {
       type: DataTypes.TINYINT,

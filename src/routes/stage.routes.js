@@ -336,6 +336,39 @@ router.put(
   stageController.rouvrirRenouvellement
 );
 
+/**
+ * @route   PUT /api/stages/renouvellements/:id/annuler-approbation
+ * @desc    Annuler l'approbation d'un renouvellement (PROGRAMMATION_EN_COURS → EN_ATTENTE) — admin uniquement
+ */
+router.put(
+  '/renouvellements/:id/annuler-approbation',
+  authenticate,
+  authorize(['ADMIN']),
+  stageController.annulerApprobationRenouvellement
+);
+
+/**
+ * @route   PUT /api/stages/renouvellements/:id/expirer
+ * @desc    Marquer manuellement un renouvellement comme EXPIRE — admin uniquement
+ */
+router.put(
+  '/renouvellements/:id/expirer',
+  authenticate,
+  authorize(['ADMIN']),
+  stageController.expirerRenouvellement
+);
+
+/**
+ * @route   DELETE /api/stages/renouvellements/:id
+ * @desc    Supprimer (soft delete) une demande de renouvellement — admin uniquement
+ */
+router.delete(
+  '/renouvellements/:id',
+  authenticate,
+  authorize(['ADMIN']),
+  stageController.supprimerRenouvellement
+);
+
 // =====================================================
 // ROUTES DOCUMENTS (AVANT /:id pour éviter les conflits)
 // =====================================================
@@ -343,12 +376,12 @@ router.put(
 /**
  * @route   POST /api/stages/documents
  * @desc    Créer un document de stage (convention ou attestation)
- * @access  Private — permission CREER sur STAGE requise
+ * @access  Private — permission CREER (convention + attestation) ou ATTESTER (attestation seule) sur STAGE
  */
 router.post(
   '/documents',
   authenticate,
-  authorizeAction('STAGE', 'CREER'),
+  authorizeAnyAction('STAGE', ['CREER', 'ATTESTER']),
   upload.single('document'),
   validatePdfFiles,
   validate(createDocumentStageSchema),

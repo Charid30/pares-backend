@@ -27,6 +27,7 @@ const ACTIONS = [
   { key: 'REJETER',     label: 'Rejeter' },
   { key: 'TRANSFERER',  label: 'Transférer' },
   { key: 'SUPPRIMER',   label: 'Supprimer' },
+  { key: 'ATTESTER',    label: 'Joindre Attestation' },
 ];
 
 // =====================================================

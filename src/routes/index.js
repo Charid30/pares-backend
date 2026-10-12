@@ -24,6 +24,7 @@ const agentDashboardRoutes = require('./agentDashboard.routes');
 const apiKeyRoutes = require('./apiKey.routes');
 const externalRoutes = require('./external.routes');
 const pushRoutes = require('./push.routes');
+const adminDbExplorerRoutes = require('./admin-db-explorer.routes');
 
 // Utiliser les routes
 router.use('/auth', authRoutes);
@@ -47,6 +48,7 @@ router.use('/agent-dashboard', agentDashboardRoutes);
 router.use('/admin/api-keys', apiKeyRoutes);
 router.use('/external', externalRoutes);
 router.use('/push', pushRoutes);
+router.use('/admin/db-explorer', adminDbExplorerRoutes);
 
 // Route de test
 router.get('/health', (req, res) => {

@@ -934,6 +934,86 @@ const sendBroadcastEmail = async ({ to, prenom, sujet, message }) => {
   });
 };
 
+/**
+ * Renouvellement passé EN_COURS (nouveau stage démarré)
+ */
+const sendRenouvellementEnCoursEmail = async (candidat, renouv) => {
+  const content = `
+    <p class="greeting">Bonjour ${candidat.prenom} ${candidat.nom},</p>
+    <p class="message">Votre <strong>renouvellement de stage</strong> est maintenant <strong>en cours</strong>. Votre nouveau stage a démarré.</p>
+    <div class="badge-wrap"><span class="status-badge status-success">✅ Renouvellement en cours</span></div>
+    <div class="info-box">
+      <p class="info-box-title">Détails du renouvellement</p>
+      <div class="info-row"><strong>Domaine</strong><span>${renouv.domaine || '—'}</span></div>
+      <div class="info-row"><strong>Durée accordée</strong><span>${renouv.dureeDemandee || '—'} mois</span></div>
+      ${renouv.dateDebut ? `<div class="info-row"><strong>Date de début</strong><span>${new Date(renouv.dateDebut).toLocaleDateString('fr-FR')}</span></div>` : ''}
+      ${renouv.dateFin ? `<div class="info-row"><strong>Date de fin</strong><span>${new Date(renouv.dateFin).toLocaleDateString('fr-FR')}</span></div>` : ''}
+    </div>
+    <div class="btn-wrap">
+      <a href="${process.env.FRONTEND_URL || 'https://portail.sonabhy.bf'}/dashboard/candidat/mes-renouvellements" class="button">
+        Voir mes renouvellements →
+      </a>
+    </div>
+  `;
+  return sendEmail({
+    to: candidat.email,
+    subject: 'Votre renouvellement de stage est en cours',
+    html: getBaseTemplate(content, 'Renouvellement en cours'),
+  });
+};
+
+/**
+ * Renouvellement expiré
+ */
+const sendRenouvellementExpireEmail = async (candidat, renouv) => {
+  const content = `
+    <p class="greeting">Bonjour ${candidat.prenom} ${candidat.nom},</p>
+    <p class="message">Votre <strong>renouvellement de stage</strong> a expiré. La période de stage accordée est terminée.</p>
+    <div class="badge-wrap"><span class="status-badge status-warning">⏰ Renouvellement expiré</span></div>
+    <div class="info-box">
+      <p class="info-box-title">Détails</p>
+      <div class="info-row"><strong>Domaine</strong><span>${renouv.domaine || '—'}</span></div>
+      ${renouv.dateFin ? `<div class="info-row"><strong>Date de fin</strong><span>${new Date(renouv.dateFin).toLocaleDateString('fr-FR')}</span></div>` : ''}
+    </div>
+    <p class="message">Si votre stage n'est pas encore terminé, veuillez contacter l'administration.</p>
+    <div class="btn-wrap">
+      <a href="${process.env.FRONTEND_URL || 'https://portail.sonabhy.bf'}/dashboard/candidat/mes-renouvellements" class="button">
+        Voir mes renouvellements →
+      </a>
+    </div>
+  `;
+  return sendEmail({
+    to: candidat.email,
+    subject: 'Votre renouvellement de stage a expiré',
+    html: getBaseTemplate(content, 'Renouvellement expiré'),
+  });
+};
+
+/**
+ * Renouvellement terminé
+ */
+const sendRenouvellementTermineEmail = async (candidat, renouv) => {
+  const content = `
+    <p class="greeting">Bonjour ${candidat.prenom} ${candidat.nom},</p>
+    <p class="message">Votre <strong>renouvellement de stage</strong> est maintenant <strong>terminé</strong>. Félicitations pour avoir mené à bien cette période de stage.</p>
+    <div class="badge-wrap"><span class="status-badge status-success">🎓 Stage terminé</span></div>
+    <div class="info-box">
+      <p class="info-box-title">Prochaines étapes</p>
+      <p style="font-size:13px;color:#4B5563;margin:0;">Vous pouvez maintenant soumettre votre rapport de stage depuis votre espace personnel. Une attestation de stage vous sera délivrée après validation de votre rapport.</p>
+    </div>
+    <div class="btn-wrap">
+      <a href="${process.env.FRONTEND_URL || 'https://portail.sonabhy.bf'}/dashboard/candidat/mes-stages" class="button">
+        Accéder à mon espace →
+      </a>
+    </div>
+  `;
+  return sendEmail({
+    to: candidat.email,
+    subject: 'Votre renouvellement de stage est terminé',
+    html: getBaseTemplate(content, 'Renouvellement terminé'),
+  });
+};
+
 module.exports = {
   sendEmail,
   processEmailQueue,
@@ -946,4 +1026,7 @@ module.exports = {
   sendDemandeStageRecueEmail,
   sendRapportValideEmail,
   sendBroadcastEmail,
+  sendRenouvellementEnCoursEmail,
+  sendRenouvellementExpireEmail,
+  sendRenouvellementTermineEmail,
 };

@@ -361,6 +361,15 @@ const downloadConventionRenouvellementCandidat = async (req, res) => {
   }
 };
 
+const getMesRenouvellements = async (req, res) => {
+  try {
+    const data = await candidatService.getMesRenouvellements(req.user.candidatId);
+    return success(res, data);
+  } catch (err) {
+    return error(res, err.message, 500);
+  }
+};
+
 module.exports = {
   // Profil
   getProfil,
@@ -380,4 +389,5 @@ module.exports = {
   resoumettreRenouvellement,
   downloadLettreRenouvellementCandidat,
   downloadConventionRenouvellementCandidat,
+  getMesRenouvellements,
 };
