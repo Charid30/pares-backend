@@ -1,6 +1,6 @@
 // src/jobs/stageStatusJob.js
 // Job pour mettre a jour automatiquement les statuts des stages
-const { Stage } = require('../models');
+const { Stage, RenouvellementStage } = require('../models');
 const { Op } = require('sequelize');
 
 /**
@@ -76,6 +76,51 @@ const expirerStagesEnCours = async () => {
 };
 
 /**
+ * Synchronise les statuts des renouvellements d'après le statut réel du stageNouveau.
+ * EN_COURS/EXPIRE/TERMINE sur le stage → même statut sur le renouvellement.
+ */
+const syncRenouvellementStatuses = async () => {
+  const SYNC = [
+    { stageStatus: 'EN_COURS',  renewalStatus: 'EN_COURS',  fromStatuses: ['ACCEPTE'] },
+    { stageStatus: 'EXPIRE',    renewalStatus: 'EXPIRE',    fromStatuses: ['EN_COURS', 'ACCEPTE'] },
+    { stageStatus: 'TERMINE',   renewalStatus: 'TERMINE',   fromStatuses: ['EN_COURS', 'ACCEPTE'] },
+    { stageStatus: 'RAPPORT_SOUMIS', renewalStatus: 'TERMINE', fromStatuses: ['EN_COURS', 'ACCEPTE'] },
+  ];
+
+  let total = 0;
+  try {
+    for (const { stageStatus, renewalStatus, fromStatuses } of SYNC) {
+      const stages = await Stage.findAll({
+        where: { statusStage: stageStatus, del: 0 },
+        attributes: ['idstage'],
+      });
+      const ids = stages.map(s => s.idstage);
+      if (!ids.length) continue;
+
+      const [count] = await RenouvellementStage.update(
+        { statusRenouvellement: renewalStatus },
+        {
+          where: {
+            stage_nouveau_idstage: { [Op.in]: ids },
+            statusRenouvellement:  { [Op.in]: fromStatuses },
+            del: 0,
+          },
+        }
+      );
+      total += count;
+    }
+
+    if (total > 0) {
+      console.log(`[CRON] ${total} renouvellement(s) synchronisé(s)`);
+    }
+    return total;
+  } catch (error) {
+    console.error('[CRON] Erreur sync renouvellements:', error.message);
+    throw error;
+  }
+};
+
+/**
  * Execute toutes les mises a jour de statut
  */
 const updateAllStageStatuses = async () => {
@@ -84,10 +129,11 @@ const updateAllStageStatuses = async () => {
   try {
     const activated = await activerStagesAcceptes();
     const expired = await expirerStagesEnCours();
+    const synced = await syncRenouvellementStatuses();
 
-    console.log(`[CRON] Terminé - ${activated} active(s), ${expired} expire(s)`);
+    console.log(`[CRON] Terminé - ${activated} active(s), ${expired} expire(s), ${synced} renouvellement(s) sync`);
 
-    return { activated, expired };
+    return { activated, expired, synced };
   } catch (error) {
     console.error('[CRON] Erreur mise a jour statuts:', error.message);
     throw error;
@@ -97,5 +143,6 @@ const updateAllStageStatuses = async () => {
 module.exports = {
   activerStagesAcceptes,
   expirerStagesEnCours,
+  syncRenouvellementStatuses,
   updateAllStageStatuses
 };

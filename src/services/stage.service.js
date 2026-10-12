@@ -19,6 +19,24 @@ const fileStorage = require('../utils/fileStorage.util');
 const { calculerDateFin, calculerPeutAgir, calculerDureeEtRepos } = require('../utils/stageCalculs.util');
 
 /**
+ * Ajoute un événement dans l'historique JSON d'un renouvellement.
+ * @param {object} renouvInstance  - instance Sequelize RenouvellementStage
+ * @param {string} statut          - nouveau statut
+ * @param {string} auteur          - nom affiché de l'acteur
+ * @param {string|null} note       - motif / commentaire optionnel
+ */
+const pushHistorique = async (renouvInstance, statut, auteur, note = null) => {
+  try {
+    let hist = [];
+    if (renouvInstance.historiqueJson) {
+      try { hist = JSON.parse(renouvInstance.historiqueJson); } catch (_) { hist = []; }
+    }
+    hist.push({ date: new Date().toISOString(), statut, auteur, note });
+    await renouvInstance.update({ historiqueJson: JSON.stringify(hist) });
+  } catch (_) { /* non-bloquant */ }
+};
+
+/**
  * Vérifie qu'un agent non-système a le droit d'agir sur une direction donnée.
  * Protège les endpoints d'action (approuver/valider/rejeter/évaluer) contre
  * un agent qui verrait un stage hors de sa direction (ex: via un rôle de
@@ -1107,36 +1125,103 @@ const createRenouvellement = async (candidatId, data, files) => {
 };
 
 /**
- * Obtenir tous les renouvellements
+ * Obtenir tous les renouvellements — avec pagination et auto-sync du statut.
+ *
+ * Auto-sync : lorsque statusRenouvellement = ACCEPTE (ou EN_COURS), on vérifie
+ * le statusStage du nouveau stage et on met à jour le statut du renouvellement
+ * pour refléter l'état réel (EN_COURS, EXPIRE, TERMINE).
  */
 const getAllRenouvellements = async (filters = {}) => {
+  const { statusRenouvellement, page = 1, limit = 15, search, dateDebut, dateFin } = filters;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
   const where = { del: 0 };
-  
-  if (filters.statusRenouvellement) {
-    where.statusRenouvellement = filters.statusRenouvellement;
+  if (statusRenouvellement) where.statusRenouvellement = statusRenouvellement;
+  if (dateDebut || dateFin) {
+    where.dateRenouvellement = {};
+    if (dateDebut) where.dateRenouvellement[Op.gte] = new Date(dateDebut);
+    if (dateFin) {
+      const fin = new Date(dateFin);
+      fin.setHours(23, 59, 59, 999);
+      where.dateRenouvellement[Op.lte] = fin;
+    }
   }
-  
-  return await RenouvellementStage.findAll({
+
+  const STAGE_BLOBS = ['dernierDiplome', 'cv', 'cnib', 'casierJudiciaire', 'lettreMotivation', 'lettreRecommandation'];
+
+  const candidatWhere = {};
+  if (search) {
+    candidatWhere[Op.or] = [
+      { nom:    { [Op.like]: `%${search}%` } },
+      { prenom: { [Op.like]: `%${search}%` } },
+      { email:  { [Op.like]: `%${search}%` } },
+    ];
+  }
+
+  const { count, rows } = await RenouvellementStage.findAndCountAll({
     where,
+    attributes: { exclude: ['lettreMotivationRenouvellement', 'conventionStageEnCours'] },
     include: [
       {
         model: Stage,
         as: 'stageActuel',
-        include: [
-          {
-            model: Candidat,
-            as: 'candidat',
-            attributes: ['idcandidats', 'nom', 'prenom', 'email'],
-          },
-        ],
+        attributes: { exclude: STAGE_BLOBS },
+        include: [{
+          model: Candidat,
+          as: 'candidat',
+          attributes: ['idcandidats', 'nom', 'prenom', 'email'],
+          ...(search ? { where: candidatWhere } : {}),
+          required: !!search,
+        }],
       },
       {
         model: Stage,
         as: 'stageNouveau',
+        attributes: ['idstage', 'statusStage', 'dateDebutEffective', 'dateFinEffective'],
       },
     ],
     order: [['dateRenouvellement', 'DESC']],
+    limit:  parseInt(limit),
+    offset,
+    distinct: true,
   });
+
+  // Auto-sync : synchroniser statusRenouvellement avec la progression du nouveau stage
+  const SYNC_MAP = {
+    EN_COURS:       'EN_COURS',
+    EXPIRE:         'EXPIRE',
+    TERMINE:        'TERMINE',
+    RAPPORT_SOUMIS: 'TERMINE',
+  };
+  for (const r of rows) {
+    const stageStatus = r.stageNouveau?.statusStage;
+    if (stageStatus && SYNC_MAP[stageStatus] && r.statusRenouvellement !== SYNC_MAP[stageStatus]) {
+      if (['ACCEPTE', 'EN_COURS'].includes(r.statusRenouvellement)) {
+        await r.update({ statusRenouvellement: SYNC_MAP[stageStatus] });
+        r.statusRenouvellement = SYNC_MAP[stageStatus];
+      }
+    }
+  }
+
+  // Compteurs par statut (hors pagination)
+  const [enAttente, enTraitement, accepte, enCours, expire, termine, rejete] = await Promise.all([
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EN_ATTENTE' } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'PROGRAMMATION_EN_COURS' } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'ACCEPTE' } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EN_COURS' } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EXPIRE' } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'TERMINE' } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'REJETE' } }),
+  ]);
+
+  return {
+    rows,
+    total: count,
+    page:  parseInt(page),
+    limit: parseInt(limit),
+    totalPages: Math.ceil(count / parseInt(limit)),
+    stats: { enAttente, enTraitement, accepte, enCours, expire, termine, rejete },
+  };
 };
 
 /**
@@ -1151,7 +1236,8 @@ const approuverRenouvellement = async (id, agentContext = null) => {
       {
         model: Stage,
         as: 'stageNouveau',
-        attributes: ['idstage', 'direction_iddirection'],
+        attributes: ['idstage', 'direction_iddirection', 'domaineStage', 'dureeStageMois'],
+        include: [{ model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom', 'email'] }],
       },
     ],
   });
@@ -1167,6 +1253,36 @@ const approuverRenouvellement = async (id, agentContext = null) => {
   await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
 
   await renouvellement.update({ statusRenouvellement: 'PROGRAMMATION_EN_COURS' });
+  const agentNomApprouver = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Agent';
+  await pushHistorique(renouvellement, 'PROGRAMMATION_EN_COURS', agentNomApprouver);
+
+  // Notification au candidat
+  try {
+    const candidat = renouvellement.stageNouveau?.candidat;
+    if (candidat?.email) {
+      const frontUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+      const urlSuivi = `${frontUrl}/dashboard/candidat/mes-stages`;
+      const html = emailService.buildBaseTemplate(`
+        <p class="greeting">Bonjour ${candidat.prenom} ${candidat.nom},</p>
+        <p class="message">Votre demande de renouvellement de stage a été <strong>approuvée</strong> et est maintenant en cours de validation par l'administration.</p>
+        <span class="status-badge status-warning">⏳ En attente de validation</span>
+        <div class="info-box">
+          <p><strong>Durée demandée :</strong> ${renouvellement.dureeDemandee} mois</p>
+        </div>
+        <div style="text-align:center;"><a href="${urlSuivi}" class="button">Suivre ma demande</a></div>
+      `, 'Renouvellement approuvé');
+      await emailService.sendEmail({ to: candidat.email, subject: 'Votre renouvellement a été approuvé', html });
+      await require('./inapp.service').push({
+        recipientType: 'CANDIDAT', recipientId: candidat.idcandidats,
+        type: 'RENOUVELLEMENT_APPROUVE',
+        titre: 'Renouvellement approuvé ✓',
+        message: 'Votre demande de renouvellement a été approuvée et est en attente de validation finale.',
+        link: urlSuivi,
+      });
+    }
+  } catch (e) {
+    console.error('❌ Notif approbation renouvellement:', e.message);
+  }
 
   return renouvellement.reload();
 };
@@ -1201,6 +1317,78 @@ const rouvrirRenouvellement = async (id) => {
   return renouvellement.reload();
 };
 
+/**
+ * Marquer manuellement un renouvellement comme EXPIRE (admin uniquement).
+ * Utile quand le cron n'a pas encore tourné.
+ */
+const expirerRenouvellement = async (id, agentContext = null) => {
+  const renouvellement = await RenouvellementStage.findOne({
+    where: { idrenouvellement: id, del: 0 },
+    include: [{ model: Stage, as: 'stageNouveau', attributes: ['idstage', 'statusStage'] }],
+  });
+  if (!renouvellement) throw new Error('Renouvellement non trouvé');
+
+  const autorisesFrom = ['ACCEPTE', 'EN_COURS'];
+  if (!autorisesFrom.includes(renouvellement.statusRenouvellement)) {
+    throw new Error(`Impossible d'expirer un renouvellement en statut ${renouvellement.statusRenouvellement}`);
+  }
+
+  await renouvellement.update({ statusRenouvellement: 'EXPIRE' });
+  if (renouvellement.stageNouveau?.statusStage === 'EN_COURS') {
+    await renouvellement.stageNouveau.update({ statusStage: 'EXPIRE' });
+  }
+  const nom = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
+  await pushHistorique(renouvellement, 'EXPIRE', nom, 'Expiration manuelle');
+  return renouvellement;
+};
+
+/**
+ * Annuler l'approbation d'un renouvellement (PROGRAMMATION_EN_COURS → EN_ATTENTE) — admin uniquement.
+ */
+const annulerApprobationRenouvellement = async (id) => {
+  const renouvellement = await RenouvellementStage.findOne({
+    where: { idrenouvellement: id, del: 0 },
+    include: [{ model: Stage, as: 'stageNouveau', attributes: ['idstage', 'statusStage'] }],
+  });
+
+  if (!renouvellement) throw new Error('Renouvellement non trouvé');
+  if (renouvellement.statusRenouvellement !== 'PROGRAMMATION_EN_COURS') {
+    throw new Error(`Seul un renouvellement approuvé peut être annulé (statut actuel : ${renouvellement.statusRenouvellement})`);
+  }
+
+  await renouvellement.update({ statusRenouvellement: 'EN_ATTENTE' });
+  await renouvellement.stageNouveau.update({ statusStage: 'EN_ATTENTE' });
+
+  return renouvellement.reload();
+};
+
+/**
+ * Supprimer (soft delete) un renouvellement — admin uniquement.
+ * Supprime aussi le nouveau stage associé (s'il est encore EN_ATTENTE ou PROGRAMMATION_EN_COURS).
+ */
+const supprimerRenouvellement = async (id) => {
+  const renouvellement = await RenouvellementStage.findOne({
+    where: { idrenouvellement: id, del: 0 },
+    include: [{ model: Stage, as: 'stageNouveau', attributes: ['idstage', 'statusStage'] }],
+  });
+
+  if (!renouvellement) throw new Error('Renouvellement non trouvé');
+
+  const suppressibles = ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS', 'REJETE'];
+  if (!suppressibles.includes(renouvellement.statusRenouvellement)) {
+    throw new Error(`Un renouvellement ${renouvellement.statusRenouvellement} ne peut pas être supprimé`);
+  }
+
+  await renouvellement.update({ del: 1 });
+
+  if (renouvellement.stageNouveau &&
+      ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS'].includes(renouvellement.stageNouveau.statusStage)) {
+    await renouvellement.stageNouveau.update({ del: 1, statusStage: 'ANNULE' });
+  }
+
+  return { deleted: true };
+};
+
 const evaluateRenouvellement = async (id, data, agentContext = null) => {
   const renouvellement = await RenouvellementStage.findOne({
     where: { idrenouvellement: id, del: 0 },
@@ -1208,7 +1396,7 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
       {
         model: Stage,
         as: 'stageNouveau',
-        include: [{ model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom'] }],
+        include: [{ model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom', 'email'] }],
       },
       {
         model: Stage,
@@ -1237,6 +1425,8 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
   await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
 
   await renouvellement.update(data);
+  const agentNomEval = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
+  await pushHistorique(renouvellement, data.statusRenouvellement, agentNomEval, data.motifRefus || null);
 
   if (data.statusRenouvellement === 'ACCEPTE') {
     const stageActuelDateFin = renouvellement.stageActuel?.dateFinEffective;
@@ -1286,6 +1476,26 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
       statusStage: 'REJETE',
       motifRefus: data.motifRefus,
     });
+  }
+
+  // Notification au candidat selon la décision
+  try {
+    const candidat = renouvellement.stageNouveau?.candidat;
+    if (candidat?.email) {
+      const frontUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+      const urlSuivi = `${frontUrl}/dashboard/candidat/mes-stages`;
+      const lignes = [{ label: 'Durée demandée', value: `${renouvellement.dureeDemandee} mois` }];
+      await notifService.sendDecisionEmail(
+        candidat,
+        'renouvellement de stage',
+        data.statusRenouvellement,
+        lignes,
+        urlSuivi,
+        data.motifRefus || null
+      );
+    }
+  } catch (e) {
+    console.error('❌ Notif décision renouvellement:', e.message);
   }
 
   return renouvellement;
@@ -1345,6 +1555,7 @@ const resoumettreRenouvellement = async (id, candidatId, files = {}) => {
   }
 
   await renouvellement.update(updateData);
+  await pushHistorique(renouvellement, 'EN_ATTENTE', 'Candidat', 'Re-soumission après rejet');
 
   // Remettre le stage associé en EN_ATTENTE
   await renouvellement.stageNouveau.update({
@@ -2530,6 +2741,9 @@ module.exports = {
   evaluateRenouvellement,
   resoumettreRenouvellement,
   rouvrirRenouvellement,
+  expirerRenouvellement,
+  annulerApprobationRenouvellement,
+  supprimerRenouvellement,
   downloadLettreRenouvellement,
   downloadConventionRenouvellement,
 

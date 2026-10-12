@@ -1,5 +1,5 @@
 // src/services/admin-dashboard.service.js
-const { Candidat, Stage, RapportStage, DemandeAudience, Aide, CandidatureOffre, DemandeModificationStage, User, sequelize } = require('../models');
+const { Candidat, Stage, RapportStage, DemandeAudience, Aide, CandidatureOffre, DemandeModificationStage, User, RenouvellementStage, sequelize } = require('../models');
 const { Op } = require('sequelize');
 
 /**
@@ -53,6 +53,11 @@ const getMenuBadges = async () => {
     where: { del: 0, status: 'EN_ATTENTE' }
   });
 
+  // Renouvellements en attente de traitement
+  const renouvellementEnAttente = await RenouvellementStage.count({
+    where: { del: 0, statusRenouvellement: { [Op.in]: ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS'] } }
+  });
+
   return {
     stagesEnAttente,
     rapportsEnAttente,
@@ -60,7 +65,8 @@ const getMenuBadges = async () => {
     audiencesEnAttente,
     aidesEnAttente,
     offresEnAttente,
-    demandesModifEnAttente
+    demandesModifEnAttente,
+    renouvellementEnAttente,
   };
 };
 
@@ -120,6 +126,16 @@ const getDashboardStats = async () => {
     where: { del: 0, statusRapport: 'VALIDE' }
   });
 
+  // === RENOUVELLEMENTS ===
+  const totalRenouvellements  = await RenouvellementStage.count({ where: { del: 0 } });
+  const renouvEnAttente       = await RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EN_ATTENTE' } });
+  const renouvEnTraitement    = await RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'PROGRAMMATION_EN_COURS' } });
+  const renouvAcceptes        = await RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'ACCEPTE' } });
+  const renouvEnCours         = await RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EN_COURS' } });
+  const renouvExpires         = await RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EXPIRE' } });
+  const renouvTermines        = await RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'TERMINE' } });
+  const renouvRejetes         = await RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'REJETE' } });
+
   // === UTILISATEURS ===
   const totalUtilisateurs = await User.count({ where: { del: 0 } });
 
@@ -151,6 +167,16 @@ const getDashboardStats = async () => {
       total: totalRapports,
       enAttente: rapportsEnAttente,
       valides: rapportsValides
+    },
+    renouvellements: {
+      total:       totalRenouvellements,
+      enAttente:   renouvEnAttente,
+      enTraitement: renouvEnTraitement,
+      acceptes:    renouvAcceptes,
+      enCours:     renouvEnCours,
+      expires:     renouvExpires,
+      termines:    renouvTermines,
+      rejetes:     renouvRejetes,
     },
     utilisateurs: {
       total: totalUtilisateurs

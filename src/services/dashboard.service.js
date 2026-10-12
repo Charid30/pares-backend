@@ -2,7 +2,7 @@
 const {
   User, Candidat, Stage,
   Offre, CandidatureOffre, Aide, CandidatureAide, Agent, Role,
-  DemandeAudience, sequelize
+  DemandeAudience, RenouvellementStage, sequelize
 } = require('../models');
 const { Op } = require('sequelize');
 
@@ -130,17 +130,39 @@ const getSecondaryStats = async () => {
     ? Math.round((stagesTraitesPosCount / totalStagesAll) * 100)
     : 0;
 
+  // Renouvellements
+  const [renouvTotal, renouvEnAttente, renouvEnTraitement, renouvAcceptes, renouvEnCours, renouvExpires, renouvTermines, renouvRejetes] = await Promise.all([
+    RenouvellementStage.count({ where: { del: 0 } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EN_ATTENTE' } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'PROGRAMMATION_EN_COURS' } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'ACCEPTE' } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EN_COURS' } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EXPIRE' } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: { [Op.in]: ['TERMINE', 'RAPPORT_SOUMIS'] } } }),
+    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'REJETE' } }),
+  ]);
+
   return {
     aidesSociales: {
-      active: demandesAidesTotal,      // total des demandes candidats
-      demandes: demandesAidesEnAttente // celles en attente de traitement
+      active: demandesAidesTotal,
+      demandes: demandesAidesEnAttente
     },
     utilisateurs: {
       total: totalAgents,
       admins: totalAdmins
     },
     stagesEnAttente: stagesEnAttenteCount,
-    tauxValidation
+    tauxValidation,
+    renouvellements: {
+      total:       renouvTotal,
+      enAttente:   renouvEnAttente,
+      enTraitement: renouvEnTraitement,
+      acceptes:    renouvAcceptes,
+      enCours:     renouvEnCours,
+      expires:     renouvExpires,
+      termines:    renouvTermines,
+      rejetes:     renouvRejetes,
+    },
   };
 };
 

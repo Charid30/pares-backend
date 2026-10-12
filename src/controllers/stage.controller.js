@@ -104,9 +104,9 @@ const createStage = async (req, res) => {
  */
 // Actions de validation de stage pouvant être accordées globalement (toutes directions)
 // à un rôle "lecture globale" (ex. Admin_RH), via les écrans dédiés "Vue globale".
-// CREER est inclus pour l'écran "Stage Terminé" : joindre l'attestation à un stage
-// terminé hors de la direction du sous-admin.
-const STAGE_GLOBAL_ACTIONS = ['APPROUVER', 'VALIDER', 'REJETER', 'CREER'];
+// CREER est inclus pour joindre une convention ; ATTESTER pour joindre une attestation
+// à un stage terminé hors de la direction du sous-admin.
+const STAGE_GLOBAL_ACTIONS = ['APPROUVER', 'VALIDER', 'REJETER', 'CREER', 'ATTESTER'];
 
 // Associe chaque action globale à LA SEULE transition de statut qu'elle autorise hors
 // direction. Évite qu'une permission VALIDER accordée pour l'écran "Stage Approuvé"
@@ -591,12 +591,33 @@ const downloadRapport = async (req, res) => {
 /**
  * Créer un document de stage (pour agents)
  * POST /api/stages/documents
+ * Garde : authorizeAnyAction('STAGE', ['CREER', 'ATTESTER'])
+ * - CREER  → conventions ET attestations
+ * - ATTESTER → attestations uniquement (rapport VALIDE requis par le service)
  */
 const createDocumentStage = async (req, res) => {
   try {
     if (!req.file) {
       return error(res, 'Le fichier PDF est requis', 400);
     }
+
+    // Un agent avec uniquement ATTESTER ne peut pas joindre une convention
+    if (req.body.typeDocument === 'CONVENTION') {
+      const userRoles = getUserRoles(req.user);
+      const isAdmin = userRoles.some(r => ACTION_SYSTEM_ROLES.includes(r));
+      if (!isAdmin) {
+        const roleIds = Array.isArray(req.user.roleIds)
+          ? req.user.roleIds
+          : (req.user.roleId ? [req.user.roleId] : []);
+        const hasCreer = await Permission.count({
+          where: { role_idrole: { [Op.in]: roleIds }, module: 'STAGE', action: 'CREER', del: 0 },
+        });
+        if (!hasCreer) {
+          return error(res, 'Permission STAGE / CREER requise pour joindre une convention', 403);
+        }
+      }
+    }
+
     const agentId = req.user.agentId || null;
     const document = await stageService.createDocumentStage(agentId, req.body, req.file);
     return success(res, document, 'Document créé avec succès', 201);
@@ -956,6 +977,54 @@ const rouvrirRenouvellement = async (req, res) => {
   }
 };
 
+const expirerRenouvellement = async (req, res) => {
+  try {
+    const agentCtx = req.user?.agentId
+      ? { id: req.user.agentId, nom: req.user.nom || req.user.username, prenom: req.user.prenom || '' }
+      : null;
+    const result = await stageService.expirerRenouvellement(req.params.id, agentCtx);
+    return success(res, result, 'Renouvellement marqué expiré');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
+const annulerApprobationRenouvellement = async (req, res) => {
+  try {
+    const result = await stageService.annulerApprobationRenouvellement(req.params.id);
+    await auditService.log({
+      agentId:  req.user.agentId,
+      agentNom: req.user.username,
+      action:   'RENOUVELLEMENT_APPROBATION_ANNULEE',
+      module:   'STAGE',
+      entityId: parseInt(req.params.id),
+      details:  { objet: 'Annulation de l\'approbation du renouvellement' },
+      ip: req.ip,
+    });
+    return success(res, result, 'Approbation annulée avec succès');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
+const supprimerRenouvellement = async (req, res) => {
+  try {
+    await stageService.supprimerRenouvellement(req.params.id);
+    await auditService.log({
+      agentId:  req.user.agentId,
+      agentNom: req.user.username,
+      action:   'RENOUVELLEMENT_SUPPRIME',
+      module:   'STAGE',
+      entityId: parseInt(req.params.id),
+      details:  { objet: 'Suppression demande de renouvellement' },
+      ip: req.ip,
+    });
+    return success(res, null, 'Renouvellement supprimé avec succès');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
 // =====================================================
 // APPROBATION DE STAGE
 // =====================================================
@@ -1151,6 +1220,9 @@ module.exports = {
   deleteStage,
   hardDeleteStage,
   rouvrirRenouvellement,
+  expirerRenouvellement,
+  annulerApprobationRenouvellement,
+  supprimerRenouvellement,
   printAllStageDocuments,
   downloadStageDocument,
   downloadConventionStage,

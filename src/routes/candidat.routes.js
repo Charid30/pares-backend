@@ -151,6 +151,12 @@ router.put(
 );
 
 /**
+ * GET /api/candidat/renouvellements
+ * Lister tous les renouvellements du candidat connecté
+ */
+router.get('/renouvellements', candidatController.getMesRenouvellements);
+
+/**
  * GET /api/candidat/renouvellements/:id/lettre
  * Télécharger la lettre de renouvellement soumise par le candidat (accès propriétaire uniquement)
  */

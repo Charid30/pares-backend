@@ -322,6 +322,15 @@ const getMesDemandesStage = async (candidatId) => {
           'lettreNonConforme', 'conventionNonConforme',
           'lettreMotivationRenouvellement_filename',
           'conventionStageEnCours_filename',
+          'stage_nouveau_idstage',
+        ],
+        include: [
+          {
+            model: Stage,
+            as: 'stageNouveau',
+            required: false,
+            attributes: ['idstage', 'dateDebutEffective', 'dateFinEffective', 'statusStage'],
+          },
         ],
       },
     ],
@@ -416,6 +425,10 @@ const getMesDemandesStage = async (candidatId) => {
           conventionNonConforme: !!r.conventionNonConforme,
           lettreFilename: r.lettreMotivationRenouvellement_filename,
           conventionFilename: r.conventionStageEnCours_filename,
+          stageNouveauId: r.stage_nouveau_idstage || null,
+          stageNouveauDateDebut: r.stageNouveau?.dateDebutEffective || null,
+          stageNouveauDateFin: r.stageNouveau?.dateFinEffective || null,
+          stageNouveauStatus: r.stageNouveau?.statusStage || null,
         };
       })(),
     };
@@ -657,6 +670,18 @@ const soumettreRapportStage = async (candidatId, stageId, data, file) => {
     throw new Error(`Le rapport ne peut être soumis que pour un stage en cours, terminé ou expiré. Statut actuel: ${stage.statusStage}`);
   }
 
+  // Bloquer si un renouvellement actif est en attente de décision sur ce stage
+  const renouvActif = await RenouvellementStage.findOne({
+    where: {
+      stage_actuel_idstage: stageId,
+      statusRenouvellement: { [Op.in]: ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS'] },
+      del: 0,
+    },
+  });
+  if (renouvActif) {
+    throw new Error('Vous ne pouvez pas soumettre votre rapport tant qu\'une demande de renouvellement est en cours de traitement. Attendez la décision sur votre renouvellement avant de soumettre le rapport.');
+  }
+
   // Trouver la racine de la chaîne — le rapport est toujours porté par le stage initial
   const root = await findChainRoot(stageId);
 
@@ -686,6 +711,18 @@ const soumettreRapportStage = async (candidatId, stageId, data, file) => {
     const chainMembers = await findAllChainMembers(root.idstage, candidatId);
     const allIds = [root.idstage, ...chainMembers.map(s => s.idstage)];
     await Stage.update({ statusStage: 'RAPPORT_SOUMIS' }, { where: { idstage: { [Op.in]: allIds } } });
+
+    // Marquer TERMINE tout renouvellement actif dont le nouveau stage fait partie de la chaîne
+    await RenouvellementStage.update(
+      { statusRenouvellement: 'TERMINE' },
+      {
+        where: {
+          stage_nouveau_idstage: { [Op.in]: allIds },
+          statusRenouvellement: { [Op.in]: ['EN_COURS', 'ACCEPTE'] },
+          del: 0,
+        },
+      }
+    );
 
     return {
       idrapport: rapport.idrapport,
@@ -959,7 +996,7 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
   });
 
   // Créer l'entrée dans renouvellement_stage avec la lettre et la convention récupérée
-  await RenouvellementStage.create({
+  const renouvellementCreated = await RenouvellementStage.create({
     stage_actuel_idstage: stageId,
     stage_nouveau_idstage: nouveauStage.idstage,
     lettreMotivationRenouvellement: file.buffer,
@@ -979,6 +1016,12 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
   if (autorisationActive) {
     await autorisationActive.update({ usedAt: new Date() });
   }
+
+  // Tracer la création dans l'historique
+  try {
+    const hist = [{ date: new Date().toISOString(), statut: 'EN_ATTENTE', auteur: 'Candidat', note: 'Demande soumise' }];
+    await renouvellementCreated.update({ historiqueJson: JSON.stringify(hist) });
+  } catch (_) { /* non-bloquant */ }
 
   return {
     idstage: nouveauStage.idstage,
@@ -1021,6 +1064,59 @@ const getRapportByStageId = async (candidatId, stageId) => {
   };
 };
 
+/**
+ * Lister tous les renouvellements du candidat (vue "Mes renouvellements")
+ */
+const getMesRenouvellements = async (candidatId) => {
+  const renouvellements = await RenouvellementStage.findAll({
+    where: { del: 0 },
+    attributes: [
+      'idrenouvellement', 'statusRenouvellement', 'motifRefus',
+      'dureeDemandee', 'dateRenouvellement', 'historiqueJson',
+    ],
+    include: [
+      {
+        model: Stage,
+        as: 'stageActuel',
+        required: true,
+        attributes: ['idstage', 'domaineStage', 'typeStage', 'dateDebutEffective', 'dateFinEffective', 'statusStage'],
+        where: { candidats_idcandidats: candidatId, del: 0 },
+      },
+      {
+        model: Stage,
+        as: 'stageNouveau',
+        required: false,
+        attributes: ['idstage', 'domaineStage', 'typeStage', 'dateDebutEffective', 'dateFinEffective', 'statusStage'],
+      },
+    ],
+    order: [['dateRenouvellement', 'DESC']],
+  });
+
+  return renouvellements.map(r => ({
+    idrenouvellement: r.idrenouvellement,
+    statusRenouvellement: r.statusRenouvellement,
+    motifRefus: r.motifRefus,
+    dureeDemandee: r.dureeDemandee,
+    dateRenouvellement: r.dateRenouvellement,
+    historique: (() => { try { return r.historiqueJson ? JSON.parse(r.historiqueJson) : []; } catch (_) { return []; } })(),
+    stageActuel: r.stageActuel ? {
+      idstage: r.stageActuel.idstage,
+      domaine: r.stageActuel.domaineStage,
+      type: r.stageActuel.typeStage,
+      dateDebut: r.stageActuel.dateDebutEffective,
+      dateFin: r.stageActuel.dateFinEffective,
+    } : null,
+    stageNouveau: r.stageNouveau ? {
+      idstage: r.stageNouveau.idstage,
+      domaine: r.stageNouveau.domaineStage,
+      type: r.stageNouveau.typeStage,
+      dateDebut: r.stageNouveau.dateDebutEffective,
+      dateFin: r.stageNouveau.dateFinEffective,
+      status: r.stageNouveau.statusStage,
+    } : null,
+  }));
+};
+
 module.exports = {
   // Profil
   getProfilCandidat,
@@ -1037,4 +1133,5 @@ module.exports = {
   getRapportByStageId,
   getConventionPourRenouvellement,
   demanderRenouvellement,
+  getMesRenouvellements,
 };
