@@ -1396,8 +1396,7 @@ const supprimerRenouvellement = async (id, agentContext = null) => {
     deletedDate: new Date(),
   });
 
-  if (renouvellement.stageNouveau &&
-      ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS'].includes(renouvellement.stageNouveau.statusStage)) {
+  if (renouvellement.stageNouveau) {
     await renouvellement.stageNouveau.update({ del: 1, statusStage: 'ANNULE' });
   }
 
