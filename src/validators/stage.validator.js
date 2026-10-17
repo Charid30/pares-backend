@@ -157,31 +157,6 @@ const updateStatusStageSchema = Joi.object({
 });
 
 /**
- * Schéma de validation pour créer un renouvellement
- */
-const createRenouvellementSchema = Joi.object({
-  stage_actuel_idstage: Joi.number()
-    .integer()
-    .required()
-    .messages({
-      'number.base': 'L\'ID du stage actuel doit être un nombre',
-      'any.required': 'L\'ID du stage actuel est requis',
-    }),
-  
-  dureeDemandee: Joi.number()
-    .integer()
-    .min(1)
-    .max(12)
-    .required()
-    .messages({
-      'number.base': 'La durée demandée doit être un nombre',
-      'number.min': 'La durée demandée doit être au moins 1 mois',
-      'number.max': 'La durée demandée ne peut pas dépasser 12 mois',
-      'any.required': 'La durée demandée est requise',
-    }),
-});
-
-/**
  * Schéma de validation pour évaluer un renouvellement
  */
 const evaluateRenouvellementSchema = Joi.object({
@@ -421,7 +396,6 @@ module.exports = {
   updateStatusStageSchema,
   updateStageSchema,
   transfererStageSchema,
-  createRenouvellementSchema,
   evaluateRenouvellementSchema,
   createRapportSchema,
   evaluateRapportSchema,

@@ -12,7 +12,6 @@ const {
   updateStatusStageSchema,
   updateStageSchema,
   transfererStageSchema,
-  createRenouvellementSchema,
   evaluateRenouvellementSchema,
   createRapportSchema,
   evaluateRapportSchema,
@@ -247,23 +246,8 @@ router.get(
 // ROUTES RENOUVELLEMENTS (AVANT /:id pour éviter les conflits)
 // =====================================================
 
-/**
- * @route   POST /api/stages/renouvellements
- * @desc    Créer une demande de renouvellement
- * @access  Private (CANDIDAT)
- */
-router.post(
-  '/renouvellements',
-  authenticate,
-  authorize(['CANDIDAT']),
-  upload.fields([
-    { name: 'lettreMotivationRenouvellement', maxCount: 1 },
-    { name: 'conventionStageEnCours', maxCount: 1 },
-  ]),
-  validatePdfFiles,
-  validate(createRenouvellementSchema),
-  stageController.createRenouvellement
-);
+// La demande de renouvellement est créée par le candidat via
+// POST /api/candidat/stages/:id/renouvellement (candidat.routes.js).
 
 /**
  * @route   GET /api/stages/renouvellements
@@ -297,6 +281,28 @@ router.get(
   authenticate,
   authorizeModule('STAGE'),
   stageController.downloadConventionRenouvellement
+);
+
+/**
+ * @route   GET /api/stages/renouvellements/:id/convention-demande
+ * @desc    Convention de la demande de stage à laquelle le renouvellement est rattaché
+ */
+router.get(
+  '/renouvellements/:id/convention-demande',
+  authenticate,
+  authorizeModule('STAGE'),
+  stageController.downloadConventionDemandeRenouvellement
+);
+
+/**
+ * @route   PUT /api/stages/renouvellements/:id/traiter
+ * @desc    Mettre un renouvellement en traitement (EN_ATTENTE → EN_COURS_DE_TRAITEMENT) — admin
+ */
+router.put(
+  '/renouvellements/:id/traiter',
+  authenticate,
+  authorize(['ADMIN']),
+  stageController.mettreEnTraitementRenouvellement
 );
 
 /**

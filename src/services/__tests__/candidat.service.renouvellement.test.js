@@ -1,9 +1,13 @@
-// Test d'intégration : demanderRenouvellement — fenêtre de 2 semaines avant
+// Test d'intégration : demanderRenouvellement — fenêtre d'une semaine avant
 // la fin du stage, et la règle des 6 mois appliquée au cumul chaîne + durée
 // demandée (pas seulement à la chaîne déjà terminée comme dans soumettreDemandeStage).
+jest.mock('../../utils/fileStorage.util', () => ({
+  saveFile: jest.fn(() => 'uploads/renouvellements/fake-path.pdf'),
+}));
+
 const { resetDb } = require('../../__tests__/helpers/testDb');
 const { creerCandidat } = require('../../__tests__/helpers/fixtures');
-const { Direction, Service, Stage } = require('../../models');
+const { Direction, Service, Stage, RenouvellementStage } = require('../../models');
 const candidatService = require('../candidat.service');
 
 const fauxFichier = { buffer: Buffer.from('pdf'), originalname: 'lettre.pdf', size: 3 };
@@ -40,11 +44,11 @@ describe('demanderRenouvellement', () => {
     await resetDb();
   });
 
-  test('refuse si le stage n\'est pas EN_COURS', async () => {
+  test('refuse si le stage n\'est ni en cours, ni terminé, ni expiré', async () => {
     const candidat = await creerCandidat();
     const { direction, service } = await creerDirectionEtService();
     const stage = await creerStageEnCours(candidat.idcandidats, direction, service, {
-      statusStage: 'TERMINE',
+      statusStage: 'ACCEPTE',
       dateFinEffective: isoDansNJours(5),
     });
 
@@ -53,11 +57,24 @@ describe('demanderRenouvellement', () => {
     ).rejects.toThrow('Le renouvellement n\'est possible que pour un stage en cours');
   });
 
-  test('refuse plus de 2 semaines avant la fin du stage', async () => {
+  test('refuse un stage TERMINE sans autorisation de l\'administration', async () => {
     const candidat = await creerCandidat();
     const { direction, service } = await creerDirectionEtService();
     const stage = await creerStageEnCours(candidat.idcandidats, direction, service, {
-      dateFinEffective: isoDansNJours(30),
+      statusStage: 'TERMINE',
+      dateFinEffective: isoDansNJours(-5),
+    });
+
+    await expect(
+      candidatService.demanderRenouvellement(candidat.idcandidats, stage.idstage, { dureeDemandee: 2 }, fauxFichier)
+    ).rejects.toThrow('Aucune autorisation de renouvellement active');
+  });
+
+  test('refuse plus d\'une semaine avant la fin du stage', async () => {
+    const candidat = await creerCandidat();
+    const { direction, service } = await creerDirectionEtService();
+    const stage = await creerStageEnCours(candidat.idcandidats, direction, service, {
+      dateFinEffective: isoDansNJours(10),
     });
 
     await expect(
@@ -119,7 +136,51 @@ describe('demanderRenouvellement', () => {
     ).rejects.toThrow('La lettre de demande de renouvellement est obligatoire');
   });
 
-  test('accepte dans la fenêtre des 2 semaines et crée le stage de renouvellement', async () => {
+  test('le renouvellement reprend la direction et le service de la demande de stage', async () => {
+    const candidat = await creerCandidat();
+    const { direction, service } = await creerDirectionEtService();
+    const stage = await creerStageEnCours(candidat.idcandidats, direction, service, {
+      dateFinEffective: isoDansNJours(5),
+    });
+
+    const result = await candidatService.demanderRenouvellement(
+      candidat.idcandidats, stage.idstage, { dureeDemandee: 1 }, fauxFichier
+    );
+
+    const nouveauStage = await Stage.findByPk(result.idstage);
+    expect(nouveauStage.direction_iddirection).toBe(direction.iddirection);
+    expect(nouveauStage.service_idservice).toBe(service.idservice);
+    // La lettre est stockée sur disque (plus en BLOB)
+    const renouvellement = await RenouvellementStage.findOne({ where: { stage_nouveau_idstage: result.idstage } });
+    expect(renouvellement.lettreMotivationRenouvellement_path).toBe('uploads/renouvellements/fake-path.pdf');
+  });
+
+  test('sans direction sur le stage actuel, reprend celle du stage d\'origine de la chaîne', async () => {
+    const candidat = await creerCandidat();
+    const { direction, service } = await creerDirectionEtService();
+    const origine = await creerStageEnCours(candidat.idcandidats, direction, service, {
+      statusStage: 'TERMINE',
+      dateDebutEffective: isoDansNJours(-40),
+      dateFinEffective: isoDansNJours(-31),
+    });
+    const actuel = await creerStageEnCours(candidat.idcandidats, direction, service, {
+      direction_iddirection: null,
+      service_idservice: null,
+      stage_parent_idstage: origine.idstage,
+      estRenouvellement: 1,
+      dateFinEffective: isoDansNJours(5),
+    });
+
+    const result = await candidatService.demanderRenouvellement(
+      candidat.idcandidats, actuel.idstage, { dureeDemandee: 1 }, fauxFichier
+    );
+
+    const nouveauStage = await Stage.findByPk(result.idstage);
+    expect(nouveauStage.direction_iddirection).toBe(direction.iddirection);
+    expect(nouveauStage.service_idservice).toBe(service.idservice);
+  });
+
+  test('accepte dans la fenêtre d\'une semaine et crée le stage de renouvellement', async () => {
     const candidat = await creerCandidat();
     const { direction, service } = await creerDirectionEtService();
     const stage = await creerStageEnCours(candidat.idcandidats, direction, service, {

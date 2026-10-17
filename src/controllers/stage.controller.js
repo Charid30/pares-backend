@@ -362,22 +362,6 @@ const getStagesSuivi = async (req, res) => {
 // RENOUVELLEMENTS
 // =====================================================
 
-/**
- * Créer une demande de renouvellement
- * POST /api/stages/renouvellements
- */
-const createRenouvellement = async (req, res) => {
-  try {
-    const result = await stageService.createRenouvellement(
-      req.user.candidatId,
-      req.body,
-      req.files
-    );
-    return success(res, result, 'Demande de renouvellement créée avec succès', 201);
-  } catch (err) {
-    return error(res, err.message, 400);
-  }
-};
 
 /**
  * Obtenir tous les renouvellements (pour agents)
@@ -385,7 +369,16 @@ const createRenouvellement = async (req, res) => {
  */
 const getAllRenouvellements = async (req, res) => {
   try {
-    const renouvellements = await stageService.getAllRenouvellements(req.query);
+    // Même portée que la liste des stages : rôle système / lecture globale → toutes les
+    // directions, sinon uniquement les directions de l'agent.
+    const isSystemRole = await hasGlobalReadAccess(req.user, 'STAGE');
+    const isActionSystemRole = getAgentContext(req.user).isSystemRole
+      || await hasGlobalActionAccess(req.user, 'STAGE', STAGE_GLOBAL_ACTIONS);
+    const renouvellements = await stageService.getAllRenouvellements(req.query, {
+      agentId: req.user.agentId,
+      isSystemRole,
+      isActionSystemRole,
+    });
     return success(res, renouvellements, 'Renouvellements récupérés avec succès');
   } catch (err) {
     console.error('[getAllRenouvellements] ERREUR:', err.message);
@@ -399,10 +392,12 @@ const getAllRenouvellements = async (req, res) => {
  */
 const approuverRenouvellement = async (req, res) => {
   try {
-    const renouvellement = await stageService.approuverRenouvellement(
-      req.params.id,
-      getAgentContext(req.user)
-    );
+    const agentContext = getAgentContext(req.user);
+    // Un rôle "lecture globale" avec APPROUVER sur STAGE peut approuver hors de sa direction
+    if (!agentContext.isSystemRole && await hasGlobalActionAccess(req.user, 'STAGE', ['APPROUVER'])) {
+      agentContext.isSystemRole = true;
+    }
+    const renouvellement = await stageService.approuverRenouvellement(req.params.id, agentContext);
     await auditService.log({
       agentId:  req.user.agentId,
       agentNom: req.user.username,
@@ -420,11 +415,17 @@ const approuverRenouvellement = async (req, res) => {
 
 const evaluateRenouvellement = async (req, res) => {
   try {
-    const renouvellement = await stageService.evaluateRenouvellement(
-      req.params.id,
-      req.body,
-      getAgentContext(req.user)
-    );
+    const agentContext = getAgentContext(req.user);
+    // L'administration (ADMIN) peut accepter dès EN_ATTENTE, comme pour une demande de stage
+    agentContext.isAdmin = getUserRoles(req.user).includes('ADMIN');
+    // Comme pour les stages : VALIDER global → accepter hors direction, REJETER global → rejeter
+    const matchingAction = Object.keys(STAGE_GLOBAL_ACTION_STATUS)
+      .find(action => STAGE_GLOBAL_ACTION_STATUS[action] === req.body.statusRenouvellement);
+    if (!agentContext.isSystemRole && matchingAction
+        && await hasGlobalActionAccess(req.user, 'STAGE', [matchingAction])) {
+      agentContext.isSystemRole = true;
+    }
+    const renouvellement = await stageService.evaluateRenouvellement(req.params.id, req.body, agentContext);
     const statut = req.body.statut || req.body.statusRenouvellement;
     await auditService.log({
       agentId:  req.user.agentId,
@@ -474,6 +475,43 @@ const downloadConventionRenouvellement = async (req, res) => {
     res.send(document.buffer);
   } catch (err) {
     return error(res, err.message, 404);
+  }
+};
+
+/**
+ * Télécharger la convention de la demande de stage rattachée au renouvellement (stage actuel)
+ * GET /api/stages/renouvellements/:id/convention-demande
+ */
+const downloadConventionDemandeRenouvellement = async (req, res) => {
+  try {
+    const document = await stageService.downloadConventionDemandeRenouvellement(req.params.id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${sanitizeFilename(document.filename)}"`);
+    res.send(document.buffer);
+  } catch (err) {
+    return error(res, err.message, 404);
+  }
+};
+
+/**
+ * Mettre un renouvellement en traitement (bouton « Traiter » — admin)
+ * PUT /api/stages/renouvellements/:id/traiter
+ */
+const mettreEnTraitementRenouvellement = async (req, res) => {
+  try {
+    const result = await stageService.mettreEnTraitementRenouvellement(req.params.id, getAgentContext(req.user));
+    await auditService.log({
+      agentId:  req.user.agentId,
+      agentNom: req.user.username,
+      action:   'RENOUVELLEMENT_EN_TRAITEMENT',
+      module:   'STAGE',
+      entityId: parseInt(req.params.id),
+      details:  { objet: 'Mise en traitement de la demande de renouvellement' },
+      ip: req.ip,
+    });
+    return success(res, result, 'Renouvellement mis en traitement');
+  } catch (err) {
+    return error(res, err.message, 400);
   }
 };
 
@@ -628,12 +666,43 @@ const createDocumentStage = async (req, res) => {
 };
 
 /**
+ * Contexte d'accès en lecture aux documents_stage (IDOR) :
+ * - ADMIN → accès global
+ * - CANDIDAT (sans compte agent) → uniquement ses propres stages
+ * - Agent → permission sur le module STAGE requise, puis cloisonnement par direction
+ *   sauf rôle système / lecture globale (hasGlobalReadAccess)
+ * Retourne null si l'utilisateur n'a pas accès au module STAGE.
+ */
+const buildDocumentStageAccess = async (user) => {
+  const userRoles = getUserRoles(user);
+  if (userRoles.includes('ADMIN')) return { agentContext: { agentId: user.agentId, isSystemRole: true } };
+  if (userRoles.includes('CANDIDAT') && !user.agentId) return { candidatId: user.candidatId || null };
+
+  const roleIds = Array.isArray(user.roleIds) && user.roleIds.length
+    ? user.roleIds
+    : (user.roleId ? [user.roleId] : []);
+  if (!roleIds.length) return null;
+  const hasModule = await Permission.count({
+    where: { role_idrole: { [Op.in]: roleIds }, module: 'STAGE', del: 0 },
+  });
+  if (!hasModule) return null;
+
+  const agentContext = getAgentContext(user);
+  if (!agentContext.isSystemRole && await hasGlobalReadAccess(user, 'STAGE')) {
+    agentContext.isSystemRole = true;
+  }
+  return { agentContext };
+};
+
+/**
  * Obtenir un document de stage par ID
  * GET /api/stages/documents/:id
  */
 const getDocumentStageById = async (req, res) => {
   try {
-    const document = await stageService.getDocumentStageById(req.params.id);
+    const access = await buildDocumentStageAccess(req.user);
+    if (!access) return error(res, 'Accès refusé : permissions insuffisantes', 403);
+    const document = await stageService.getDocumentStageById(req.params.id, access);
     return success(res, document, 'Document récupéré avec succès');
   } catch (err) {
     return error(res, err.message, 404);
@@ -646,7 +715,9 @@ const getDocumentStageById = async (req, res) => {
  */
 const downloadDocumentStage = async (req, res) => {
   try {
-    const document = await stageService.downloadDocumentStage(req.params.id);
+    const access = await buildDocumentStageAccess(req.user);
+    if (!access) return error(res, 'Accès refusé : permissions insuffisantes', 403);
+    const document = await stageService.downloadDocumentStage(req.params.id, access);
     
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${sanitizeFilename(document.filename)}"`);
@@ -1202,6 +1273,7 @@ module.exports = {
   // Permissions "lecture globale" (exportées pour les tests unitaires)
   hasGlobalReadAccess,
   hasGlobalActionAccess,
+  buildDocumentStageAccess,
 
   // Stages
   createStage,
@@ -1221,6 +1293,8 @@ module.exports = {
   deleteStage,
   hardDeleteStage,
   rouvrirRenouvellement,
+  mettreEnTraitementRenouvellement,
+  downloadConventionDemandeRenouvellement,
   expirerRenouvellement,
   annulerApprobationRenouvellement,
   supprimerRenouvellement,
@@ -1235,7 +1309,6 @@ module.exports = {
   getStagesSuivi,
 
   // Renouvellements
-  createRenouvellement,
   getAllRenouvellements,
   approuverRenouvellement,
   evaluateRenouvellement,

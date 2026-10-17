@@ -310,7 +310,6 @@ const resoumettreRenouvellement = async (req, res) => {
   try {
     const files = {};
     if (req.files?.lettreRenouvellement?.[0]) files.lettre = req.files.lettreRenouvellement[0];
-    if (req.files?.conventionRenouvellement?.[0]) files.convention = req.files.conventionRenouvellement[0];
 
     const result = await stageService.resoumettreRenouvellement(
       req.params.id,

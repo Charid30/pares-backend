@@ -1,30 +1,44 @@
 // src/jobs/stageStatusJob.js
 // Job pour mettre a jour automatiquement les statuts des stages
-const { Stage, RenouvellementStage, Candidat } = require('../models');
+const { Stage, RenouvellementStage, Candidat, DocumentStage } = require('../models');
 const { Op } = require('sequelize');
 const emailService = require('../services/email.service');
 
 /**
  * Met a jour les stages ACCEPTE vers EN_COURS quand la dateDebutEffective est atteinte
+ * ET que leur convention est jointe (un stage n'est validé qu'avec sa convention)
  */
 const activerStagesAcceptes = async () => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   try {
+    // Un stage n'est validé que lorsque sa convention est jointe : sans convention,
+    // il reste ACCEPTE même si sa date de début est passée.
+    const aActiver = await Stage.findAll({
+      attributes: ['idstage'],
+      where: {
+        statusStage: 'ACCEPTE',
+        dateDebutEffective: { [Op.lte]: today },
+        del: 0,
+      },
+      include: [{
+        model: DocumentStage,
+        as: 'documents',
+        attributes: [],
+        where: { typeDocument: 'CONVENTION', del: 0 },
+        required: true,
+      }],
+    });
+    if (aActiver.length === 0) return 0;
+
     const result = await Stage.update(
       {
         statusStage: 'EN_COURS',
         lastmodifiedDate: new Date()
       },
       {
-        where: {
-          statusStage: 'ACCEPTE',
-          dateDebutEffective: {
-            [Op.lte]: today
-          },
-          del: 0
-        }
+        where: { idstage: { [Op.in]: aActiver.map(s => s.idstage) } }
       }
     );
 

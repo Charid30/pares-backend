@@ -31,16 +31,17 @@ const getMainStats = async () => {
     : candidatsThisMonth > 0 ? 100 : 0;
 
   // Stages
-  const totalStages = await Stage.count({ where: { del: 0 } });
+  const totalStages = await Stage.count({ where: { del: 0, stage_parent_idstage: null } });
   const stagesEnCours = await Stage.count({
     where: { del: 0, statusStage: 'EN_COURS' }
   });
   const stagesThisMonth = await Stage.count({
-    where: { del: 0, createdDate: { [Op.gte]: startOfMonth } }
+    where: { del: 0, stage_parent_idstage: null, createdDate: { [Op.gte]: startOfMonth } }
   });
   const stagesLastMonth = await Stage.count({
     where: {
       del: 0,
+      stage_parent_idstage: null,
       createdDate: { [Op.gte]: startOfLastMonth, [Op.lte]: endOfLastMonth }
     }
   });
@@ -115,14 +116,15 @@ const getSecondaryStats = async () => {
   });
 
   const stagesEnAttenteCount = await Stage.count({
-    where: { del: 0, statusStage: 'EN_ATTENTE' }
+    where: { del: 0, stage_parent_idstage: null, statusStage: 'EN_ATTENTE' }
   });
 
   // Taux de validation : stages traités positivement / total stages
-  const totalStagesAll = await Stage.count({ where: { del: 0 } });
+  const totalStagesAll = await Stage.count({ where: { del: 0, stage_parent_idstage: null } });
   const stagesTraitesPosCount = await Stage.count({
     where: {
       del: 0,
+      stage_parent_idstage: null,
       statusStage: { [Op.in]: ['ACCEPTE', 'EN_COURS', 'TERMINE'] }
     }
   });
@@ -324,6 +326,7 @@ const getChartData = async () => {
     const stagesValidesCount = await Stage.count({
       where: {
         del: 0,
+        stage_parent_idstage: null,
         statusStage: { [Op.in]: ['VALIDE', 'TERMINE', 'EN_COURS'] },
         [Op.or]: [
           {
@@ -347,6 +350,7 @@ const getChartData = async () => {
     const stagesSoumisCount = await Stage.count({
       where: {
         del: 0,
+        stage_parent_idstage: null,
         createdDate: { [Op.gte]: startOfMonth, [Op.lte]: endOfMonth }
       }
     });
@@ -366,12 +370,12 @@ const getChartData = async () => {
  */
 const getStagesDonut = async () => {
   const [enAttente, enTraitement, acceptes, enCours, termines, rejetes] = await Promise.all([
-    Stage.count({ where: { del: 0, statusStage: 'EN_ATTENTE' } }),
-    Stage.count({ where: { del: 0, statusStage: { [Op.in]: ['EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'] } } }),
-    Stage.count({ where: { del: 0, statusStage: 'ACCEPTE' } }),
+    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'EN_ATTENTE' } }),
+    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: { [Op.in]: ['EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'] } } }),
+    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'ACCEPTE' } }),
     Stage.count({ where: { del: 0, statusStage: 'EN_COURS' } }),
-    Stage.count({ where: { del: 0, statusStage: 'TERMINE' } }),
-    Stage.count({ where: { del: 0, statusStage: 'REJETE' } }),
+    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'TERMINE' } }),
+    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'REJETE' } }),
   ]);
   return {
     labels: ['En attente', 'En traitement', 'Acceptés', 'En cours', 'Terminés', 'Rejetés'],

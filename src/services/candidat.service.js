@@ -13,9 +13,10 @@ const {
 const { Op } = require('sequelize');
 const emailService = require('./email.service');
 const notifService = require('./notification.service');
-const { calculerDateFin, getDureeContinueCandidat } = require('./stage.service');
+const { calculerDateFin, getDureeContinueCandidat, enrichirAvecChaine } = require('./stage.service');
 
 const DUREE_MAX_CONTINUE_MOIS = 6;   // Maximum 6 mois de stage continu
+const DELAI_RENOUVELLEMENT_JOURS = 7; // Renouvellement possible à partir d'une semaine avant la fin du stage
 const REPOS_OBLIGATOIRE_MOIS = 1;    // 1 mois de repos minimum après 6 mois
 
 // =====================================================
@@ -319,9 +320,8 @@ const getMesDemandesStage = async (candidatId) => {
         required: false,
         attributes: [
           'idrenouvellement', 'statusRenouvellement', 'motifRefus',
-          'lettreNonConforme', 'conventionNonConforme',
+          'lettreNonConforme',
           'lettreMotivationRenouvellement_filename',
-          'conventionStageEnCours_filename',
           'stage_nouveau_idstage',
         ],
         include: [
@@ -330,6 +330,14 @@ const getMesDemandesStage = async (candidatId) => {
             as: 'stageNouveau',
             required: false,
             attributes: ['idstage', 'dateDebutEffective', 'dateFinEffective', 'statusStage'],
+            // Convention du renouvellement = celle jointe par l'agent/admin sur le nouveau stage
+            include: [{
+              model: DocumentStage,
+              as: 'documents',
+              where: { typeDocument: 'CONVENTION', del: 0 },
+              required: false,
+              attributes: ['document_filename'],
+            }],
           },
         ],
       },
@@ -372,7 +380,7 @@ const getMesDemandesStage = async (candidatId) => {
     }
   }
 
-  return stages.map(stage => {
+  const items = stages.map(stage => {
     // Verifier si une convention existe
     const convention = stage.documents && stage.documents.length > 0 ? stage.documents[0] : null;
 
@@ -422,9 +430,8 @@ const getMesDemandesStage = async (candidatId) => {
           statusRenouvellement: r.statusRenouvellement,
           motifRefus: r.motifRefus,
           lettreNonConforme: !!r.lettreNonConforme,
-          conventionNonConforme: !!r.conventionNonConforme,
           lettreFilename: r.lettreMotivationRenouvellement_filename,
-          conventionFilename: r.conventionStageEnCours_filename,
+          conventionFilename: r.stageNouveau?.documents?.[0]?.document_filename || null,
           stageNouveauId: r.stage_nouveau_idstage || null,
           stageNouveauDateDebut: r.stageNouveau?.dateDebutEffective || null,
           stageNouveauDateFin: r.stageNouveau?.dateFinEffective || null,
@@ -433,6 +440,10 @@ const getMesDemandesStage = async (candidatId) => {
       })(),
     };
   });
+
+  // Le renouvellement prolonge le stage initial : statut « PROLONGE » et durée totale (comme côté admin)
+  await enrichirAvecChaine(items);
+  return items;
 };
 
 /**
@@ -674,7 +685,7 @@ const soumettreRapportStage = async (candidatId, stageId, data, file) => {
   const renouvActif = await RenouvellementStage.findOne({
     where: {
       stage_actuel_idstage: stageId,
-      statusRenouvellement: { [Op.in]: ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS'] },
+      statusRenouvellement: { [Op.in]: ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'] },
       del: 0,
     },
   });
@@ -778,7 +789,7 @@ const getConventionPourRenouvellement = async (candidatId, stageId) => {
     }
   }
 
-  // Vérifier la fenêtre de renouvellement (2 semaines avant la fin) — uniquement pour EN_COURS
+  // Vérifier la fenêtre de renouvellement (DELAI_RENOUVELLEMENT_JOURS avant la fin) — uniquement pour EN_COURS
   if (!estFinished) {
     if (!stage.dateFinEffective) {
       throw new Error('Date de fin du stage non définie');
@@ -788,11 +799,11 @@ const getConventionPourRenouvellement = async (candidatId, stageId) => {
     dateFin.setHours(0, 0, 0, 0);
     const aujourdhui = new Date();
     aujourdhui.setHours(0, 0, 0, 0);
-    const deuxSemainesAvant = new Date(dateFin);
-    deuxSemainesAvant.setDate(deuxSemainesAvant.getDate() - 14);
+    const debutFenetre = new Date(dateFin);
+    debutFenetre.setDate(debutFenetre.getDate() - DELAI_RENOUVELLEMENT_JOURS);
 
-    if (aujourdhui < deuxSemainesAvant) {
-      const joursRestants = Math.ceil((deuxSemainesAvant - aujourdhui) / (1000 * 60 * 60 * 24));
+    if (aujourdhui < debutFenetre) {
+      const joursRestants = Math.ceil((debutFenetre - aujourdhui) / (1000 * 60 * 60 * 24));
       throw new Error(`Le renouvellement sera disponible dans ${joursRestants} jours`);
     }
 
@@ -843,7 +854,7 @@ const getConventionPourRenouvellement = async (candidatId, stageId) => {
 
 /**
  * Demander le renouvellement d'un stage
- * Disponible uniquement 2 semaines avant la fin du stage
+ * Disponible uniquement une semaine avant la fin du stage
  * @param {number} candidatId
  * @param {number} stageId
  * @param {object} data - { dureeDemandee }
@@ -896,11 +907,11 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
     dateFin.setHours(0, 0, 0, 0);
     const aujourdhui = new Date();
     aujourdhui.setHours(0, 0, 0, 0);
-    const deuxSemainesAvant = new Date(dateFin);
-    deuxSemainesAvant.setDate(deuxSemainesAvant.getDate() - 14);
+    const debutFenetre = new Date(dateFin);
+    debutFenetre.setDate(debutFenetre.getDate() - DELAI_RENOUVELLEMENT_JOURS);
 
-    if (aujourdhui < deuxSemainesAvant) {
-      const joursRestants = Math.ceil((deuxSemainesAvant - aujourdhui) / (1000 * 60 * 60 * 24));
+    if (aujourdhui < debutFenetre) {
+      const joursRestants = Math.ceil((debutFenetre - aujourdhui) / (1000 * 60 * 60 * 24));
       throw new Error(`Le renouvellement sera disponible dans ${joursRestants} jours`);
     }
 
@@ -948,15 +959,26 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Ne pas copier la convention du stage parent — la convention du renouvellement
-  // sera celle que l'admin uploadera lors de l'acceptation (document_stage du stage_nouveau).
-  const conventionDoc = null;
-
   const dureeDemandee = parseInt(data.dureeDemandee) || stage.dureeStage;
 
   // Le renouvellement commence le lendemain de la fin du stage actuel (dateFin est le dernier jour actif)
   const dateDebutRenouvellement = new Date(stage.dateFinEffective);
   dateDebutRenouvellement.setDate(dateDebutRenouvellement.getDate() + 1);
+
+  // Le renouvellement reprend la direction/service de la demande de stage d'origine :
+  // si le stage actuel n'en a pas (ancien renouvellement incomplet), on remonte la chaîne.
+  let directionId = stage.direction_iddirection;
+  let serviceId = stage.service_idservice;
+  if (!directionId && stage.stage_parent_idstage) {
+    let parentId = stage.stage_parent_idstage;
+    while (parentId && !directionId) {
+      const parent = await Stage.findOne({ where: { idstage: parentId, del: 0 } });
+      if (!parent) break;
+      directionId = parent.direction_iddirection;
+      serviceId = serviceId || parent.service_idservice;
+      parentId = parent.stage_parent_idstage;
+    }
+  }
 
   // Créer une nouvelle demande de stage comme renouvellement
   const nouveauStage = await Stage.create({
@@ -970,38 +992,40 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
     estRenouvellement: 1,
     stage_parent_idstage: stageId,
     // Reconduire la direction et le service d'origine
-    direction_iddirection: stage.direction_iddirection,
-    service_idservice: stage.service_idservice,
-    // Copier les documents du stage parent
+    direction_iddirection: directionId,
+    service_idservice: serviceId,
+    // Copier les documents du stage parent (chemin disque + BLOB legacy)
     cv: stage.cv,
+    cv_path: stage.cv_path,
     cv_filename: stage.cv_filename,
     cv_size: stage.cv_size,
     cnib: stage.cnib,
+    cnib_path: stage.cnib_path,
     cnib_filename: stage.cnib_filename,
     cnib_size: stage.cnib_size,
     casierJudiciaire: stage.casierJudiciaire,
+    casierJudiciaire_path: stage.casierJudiciaire_path,
     casierJudiciaire_filename: stage.casierJudiciaire_filename,
     casierJudiciaire_size: stage.casierJudiciaire_size,
     lettreMotivation: stage.lettreMotivation,
+    lettreMotivation_path: stage.lettreMotivation_path,
     lettreMotivation_filename: stage.lettreMotivation_filename,
     lettreMotivation_size: stage.lettreMotivation_size,
     lettreRecommandation: stage.lettreRecommandation,
+    lettreRecommandation_path: stage.lettreRecommandation_path,
     lettreRecommandation_filename: stage.lettreRecommandation_filename,
     lettreRecommandation_size: stage.lettreRecommandation_size,
   });
 
-  // Créer l'entrée dans renouvellement_stage avec la lettre et la convention récupérée
+  // Créer l'entrée dans renouvellement_stage avec la lettre du candidat.
+  // La convention du renouvellement est jointe plus tard par l'agent/admin (document_stage).
   const renouvellementCreated = await RenouvellementStage.create({
     stage_actuel_idstage: stageId,
     stage_nouveau_idstage: nouveauStage.idstage,
-    lettreMotivationRenouvellement: file.buffer,
+    lettreMotivationRenouvellement: null,
+    lettreMotivationRenouvellement_path: fileStorage.saveFile(file.buffer, file.originalname, 'renouvellements'),
     lettreMotivationRenouvellement_filename: file.originalname,
     lettreMotivationRenouvellement_size: file.size,
-    // Copier la convention depuis document_stage si elle existe
-    conventionStageEnCours: conventionDoc ? conventionDoc.document : null,
-    conventionStageEnCours_path: conventionDoc ? conventionDoc.document_path : null,
-    conventionStageEnCours_filename: conventionDoc ? conventionDoc.document_filename : null,
-    conventionStageEnCours_size: conventionDoc ? conventionDoc.document_size : null,
     dureeDemandee: dureeDemandee,
     statusRenouvellement: 'EN_ATTENTE',
   });
@@ -1023,7 +1047,6 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
     statusStage: nouveauStage.statusStage,
     estRenouvellement: nouveauStage.estRenouvellement,
     stageParentId: stageId,
-    conventionJointe: !!conventionDoc,
     createdDate: nouveauStage.createdDate,
   };
 };
@@ -1065,8 +1088,8 @@ const getMesRenouvellements = async (candidatId) => {
       'idrenouvellement', 'statusRenouvellement', 'motifRefus',
       'dureeDemandee', 'dateRenouvellement',
       'createdBy', 'lastModifiedBy', 'lastModifiedDate',
-      'lettreNonConforme', 'conventionNonConforme',
-      'lettreMotivationRenouvellement_filename', 'conventionStageEnCours_filename',
+      'lettreNonConforme',
+      'lettreMotivationRenouvellement_filename',
     ],
     include: [
       {
@@ -1081,6 +1104,14 @@ const getMesRenouvellements = async (candidatId) => {
         as: 'stageNouveau',
         required: false,
         attributes: ['idstage', 'domaineStage', 'typeStage', 'dateDebutEffective', 'dateFinEffective', 'statusStage'],
+        // Convention du renouvellement = celle jointe par l'agent/admin sur le nouveau stage
+        include: [{
+          model: DocumentStage,
+          as: 'documents',
+          where: { typeDocument: 'CONVENTION', del: 0 },
+          required: false,
+          attributes: ['document_filename'],
+        }],
       },
     ],
     order: [['dateRenouvellement', 'DESC']],
@@ -1096,9 +1127,8 @@ const getMesRenouvellements = async (candidatId) => {
     lastModifiedBy: r.lastModifiedBy,
     lastModifiedDate: r.lastModifiedDate,
     lettreNonConforme: r.lettreNonConforme,
-    conventionNonConforme: r.conventionNonConforme,
     lettreMotivationFilename: r.lettreMotivationRenouvellement_filename,
-    conventionFilename: r.conventionStageEnCours_filename,
+    conventionFilename: r.stageNouveau?.documents?.[0]?.document_filename || null,
     stageActuel: r.stageActuel ? {
       idstage: r.stageActuel.idstage,
       domaine: r.stageActuel.domaineStage,
