@@ -28,3 +28,6 @@ Thumbs.db
 .vs/
 *.swp
 *.suo
+
+# Instructions Claude Code (copiées manuellement, non versionnées)
+CLAUDE.md
