@@ -326,7 +326,12 @@ const downloadConventionStage = async (req, res) => {
 const remplacerConventionStage = async (req, res) => {
   try {
     const agentId = req.user.agentId || null;
-    const doc = await stageService.remplacerConventionStage(req.params.id, agentId, req.file);
+    // Un agent ne remplace la convention que d'un stage de sa direction (sauf accès global CREER)
+    const agentContext = getAgentContext(req.user);
+    if (!agentContext.isSystemRole && await hasGlobalActionAccess(req.user, 'STAGE', ['CREER'])) {
+      agentContext.isSystemRole = true;
+    }
+    const doc = await stageService.remplacerConventionStage(req.params.id, agentId, req.file, agentContext);
     await auditService.log({
       userId: req.user.id,
       action: 'REMPLACER_CONVENTION',
@@ -529,8 +534,13 @@ const createRapport = async (req, res) => {
       return error(res, 'Le fichier PDF du rapport est requis', 400);
     }
     
-    const rapport = await stageService.createRapport(
+    // Point d'entrée unique du rapport : même règle que POST /api/candidat/stages/:id/rapport
+    // (un rapport par chaîne stage + renouvellements, après la fin du dernier stage ou sur
+    // autorisation de l'administration).
+    const candidatService = require('../services/candidat.service');
+    const rapport = await candidatService.soumettreRapportStage(
       req.user.candidatId,
+      req.body.stage_idstage,
       req.body,
       req.file
     );
@@ -913,7 +923,11 @@ const exportStagesPDF = async (req, res) => {
 const updateStage = async (req, res) => {
   try {
     const agentContext = getAgentContext(req.user);
-    const stage = await stageService.updateStage(req.params.id, req.body, agentContext);
+    // Accès global (rôle « lecture globale » avec MODIFIER) : pas de cloisonnement par direction
+    // pour les dates — l'affectation direction/service reste réservée aux rôles système.
+    const accesGlobalModifier = !agentContext.isSystemRole && await hasGlobalActionAccess(req.user, 'STAGE', ['MODIFIER']);
+    const stage = await stageService.updateStage(req.params.id, req.body,
+      accesGlobalModifier ? { ...agentContext, isSystemRole: true, accesGlobalModifier: true } : agentContext);
     return success(res, stage, 'Stage modifié avec succès');
   } catch (err) {
     return error(res, err.message, 400);
@@ -1144,6 +1158,37 @@ const approuverStage = async (req, res) => {
  * Accorder une autorisation de renouvellement pour un stage terminé/expiré
  * PUT /api/stages/:id/autoriser-renouvellement
  */
+/**
+ * Autoriser la soumission anticipée du rapport (avant la fin du dernier stage de la chaîne)
+ * PUT /api/stages/:id/autoriser-rapport
+ */
+const autoriserRapport = async (req, res) => {
+  try {
+    const agentContext = getAgentContext(req.user);
+    if (!agentContext.isSystemRole && await hasGlobalActionAccess(req.user, 'STAGE', ['VALIDER'])) {
+      agentContext.isSystemRole = true;
+    }
+    const autorisation = await stageService.autoriserRapportStage(req.params.id, req.user.agentId, agentContext);
+    await auditService.log({
+      agentId:  req.user.agentId,
+      agentNom: req.user.username,
+      action:   'STAGE_RAPPORT_AUTORISE',
+      module:   'STAGE',
+      entityId: parseInt(req.params.id),
+      details:  {
+        objet:  'Autorisation de soumission anticipée du rapport de stage',
+        nom:    autorisation.candidat?.nom    || null,
+        prenom: autorisation.candidat?.prenom || null,
+        expiresAt: autorisation.expiresAt,
+      },
+      ip: req.ip,
+    });
+    return success(res, autorisation, 'Autorisation de rapport accordée (7 jours)');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
 const autoriserRenouvellement = async (req, res) => {
   try {
     const autorisation = await stageService.autoriserRenouvellementStage(
@@ -1332,6 +1377,7 @@ module.exports = {
 
   // Autorisation de renouvellement
   autoriserRenouvellement,
+  autoriserRapport,
 
   // Demandes de modification
   createDemandeModification,

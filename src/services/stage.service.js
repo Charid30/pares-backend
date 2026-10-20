@@ -6,6 +6,7 @@ const {
   DocumentStage,
   DemandeModificationStage,
   AutorisationRenouvellementStage,
+  AutorisationRapportStage,
   Candidat,
   Agent,
   Service,
@@ -675,6 +676,18 @@ const getStageById = async (id, user = null) => {
         },
         attributes: ['id', 'expiresAt', 'autorisePar'],
       },
+      // Autorisation de soumission anticipée du rapport (admin → candidat), portée par la racine
+      {
+        model: AutorisationRapportStage,
+        as: 'autorisationsRapport',
+        required: false,
+        where: {
+          del: 0,
+          usedAt: null,
+          expiresAt: { [Op.gt]: new Date() },
+        },
+        attributes: ['id', 'expiresAt', 'autorisePar'],
+      },
     ],
   });
 
@@ -1073,11 +1086,14 @@ const downloadStageDocument = async (id, documentType, user = null) => {
 /**
  * Remplacer la convention de stage existante par une nouvelle version
  */
-const remplacerConventionStage = async (stageId, agentId, file) => {
+const remplacerConventionStage = async (stageId, agentId, file, agentContext = null) => {
   if (!file) throw new Error('Le fichier PDF est requis');
 
   const stage = await Stage.findOne({ where: { idstage: stageId, del: 0 } });
   if (!stage) throw new Error('Stage non trouvé');
+
+  // Un agent ne peut remplacer que la convention d'un stage de sa direction
+  await assertAgentOwnsDirection(agentContext, stage.direction_iddirection);
 
   const ancienneConvention = await DocumentStage.findOne({
     where: { stage_idstage: stageId, typeDocument: 'CONVENTION', del: 0 },
@@ -2444,6 +2460,9 @@ const updateStage = async (stageId, data, agentContext = null) => {
   const stage = await Stage.findOne({ where: { idstage: stageId, del: 0 } });
   if (!stage) throw new Error('Stage non trouvé');
 
+  // Un agent (permission MODIFIER) ne modifie que les stages de sa direction
+  await assertAgentOwnsDirection(agentContext, stage.direction_iddirection);
+
   const updates = {};
   if (data.commentaireAdmin !== undefined)    updates.commentaireAdmin    = data.commentaireAdmin || null;
   if (data.dureeStage !== undefined)          updates.dureeStage          = data.dureeStage;
@@ -2471,7 +2490,7 @@ const updateStage = async (stageId, data, agentContext = null) => {
   // déplacer un stage vers une autre direction par ce biais (voir transfererStage
   // pour le flux normal, avec vérification de propriété de la direction d'origine).
   if (data.direction_iddirection !== undefined || data.service_idservice !== undefined) {
-    if (!agentContext || !agentContext.isSystemRole) {
+    if (!agentContext || !agentContext.isSystemRole || agentContext.accesGlobalModifier) {
       throw new Error('Action non autorisée');
     }
     if (data.direction_iddirection !== undefined) {
@@ -2911,6 +2930,64 @@ const autoriserRenouvellementStage = async (stageId, agentId) => {
 };
 
 /**
+ * Autoriser le candidat à soumettre son rapport avant la fin du dernier stage de la chaîne
+ * (même principe que l'autorisation de renouvellement : fenêtre de 7 jours).
+ * L'autorisation est portée par le stage racine de la chaîne (un seul rapport par chaîne).
+ */
+const autoriserRapportStage = async (stageId, agentId, agentContext = null) => {
+  const inapp = require('./inapp.service');
+
+  let racine = await Stage.findOne({
+    where: { idstage: stageId, del: 0 },
+    include: [{ model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom'] }],
+  });
+  if (!racine) throw new Error('Stage non trouvé');
+  while (racine.stage_parent_idstage) {
+    const parent = await Stage.findOne({
+      where: { idstage: racine.stage_parent_idstage, del: 0 },
+      include: [{ model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom'] }],
+    });
+    if (!parent) break;
+    racine = parent;
+  }
+
+  await assertAgentOwnsDirection(agentContext, racine.direction_iddirection);
+
+  const rapport = await RapportStage.findOne({ where: { stage_idstage: racine.idstage, del: 0 } });
+  if (rapport) throw new Error('Le rapport de ce stage a déjà été soumis');
+  if (!['ACCEPTE', 'EN_COURS', 'SUSPENDU', 'EXPIRE', 'TERMINE'].includes(racine.statusStage)) {
+    throw new Error('L\'autorisation de rapport n\'est possible que pour un stage validé');
+  }
+
+  await AutorisationRapportStage.update({ del: 1 }, { where: { stage_idstage: racine.idstage, del: 0 } });
+
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7);
+  const autorisation = await AutorisationRapportStage.create({
+    stage_idstage: racine.idstage,
+    autorisePar: agentId || null,
+    expiresAt,
+    usedAt: null,
+    del: 0,
+  });
+
+  const candidatId = racine.candidat?.idcandidats;
+  if (candidatId) {
+    const expireStr = expiresAt.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+    await inapp.push({
+      recipientType: 'CANDIDAT',
+      recipientId: candidatId,
+      type: 'STAGE',
+      titre: 'Rapport de stage autorisé',
+      message: `L'administration vous autorise à soumettre votre rapport de stage dès maintenant. Cette autorisation expire le ${expireStr}.`,
+      link: '/candidat/stages',
+    });
+  }
+
+  return { ...autorisation.toJSON(), candidat: racine.candidat };
+};
+
+/**
  * Récupère l'autorisation active (non expirée, non utilisée, non supprimée) pour un stage.
  * Retourne null si aucune n'existe.
  */
@@ -2994,5 +3071,6 @@ module.exports = {
 
   // Autorisation de renouvellement
   autoriserRenouvellementStage,
+  autoriserRapportStage,
   getAutorisationActive,
 };

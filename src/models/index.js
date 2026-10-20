@@ -34,6 +34,8 @@ const DemandeModificationStage = require('./DemandeModificationStage')(sequelize
 if (!isTestEnv) DemandeModificationStage.sync({ force: false }).catch(e => console.error('DemandeModificationStage sync:', e.message));
 const AutorisationRenouvellementStage = require('./AutorisationRenouvellementStage')(sequelize);
 if (!isTestEnv) AutorisationRenouvellementStage.sync({ force: false }).catch(e => console.error('AutorisationRenouvellementStage sync:', e.message));
+// Table créée par migrations/migration_prod_autorisation_rapport.sql
+const AutorisationRapportStage = require('./AutorisationRapportStage')(sequelize);
 
 // Module Offres
 const Offre = require('./Offre')(sequelize);
@@ -331,6 +333,16 @@ AutorisationRenouvellementStage.belongsTo(Stage, {
   as: 'stage',
 });
 
+// Stage (racine de la chaîne) ↔ AutorisationRapportStage (1:N)
+Stage.hasMany(AutorisationRapportStage, {
+  foreignKey: 'stage_idstage',
+  as: 'autorisationsRapport',
+});
+AutorisationRapportStage.belongsTo(Stage, {
+  foreignKey: 'stage_idstage',
+  as: 'stage',
+});
+
 // Agent ↔ AutorisationRenouvellementStage (1:N)
 Agent.hasMany(AutorisationRenouvellementStage, {
   foreignKey: 'autorisePar',
@@ -527,6 +539,7 @@ module.exports = {
   DocumentStage,
   DemandeModificationStage,
   AutorisationRenouvellementStage,
+  AutorisationRapportStage,
   
   // Offres
   Offre,

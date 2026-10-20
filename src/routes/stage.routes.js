@@ -570,6 +570,18 @@ router.put(
 );
 
 /**
+ * @route   PUT /api/stages/:id/autoriser-rapport
+ * @desc    Autoriser la soumission anticipée du rapport (avant la fin du dernier stage de la chaîne), 7 jours
+ * @access  Private — permission VALIDER sur STAGE (direction de l'agent, sauf accès global)
+ */
+router.put(
+  '/:id/autoriser-rapport',
+  authenticate,
+  authorizeAction('STAGE', 'VALIDER'),
+  stageController.autoriserRapport
+);
+
+/**
  * @route   POST /api/stages/:id/demandes-modification
  * @desc    Soumettre une demande de modification (suspension ou annulation)
  * @access  Private (CANDIDAT)
