@@ -9,13 +9,15 @@ const {
   RenouvellementStage,
   DemandeModificationStage,
   AutorisationRenouvellementStage,
+  AutorisationRapportStage,
 } = require('../models');
 const { Op } = require('sequelize');
 const emailService = require('./email.service');
 const notifService = require('./notification.service');
-const { calculerDateFin, getDureeContinueCandidat } = require('./stage.service');
+const { calculerDateFin, getDureeContinueCandidat, enrichirAvecChaine } = require('./stage.service');
 
 const DUREE_MAX_CONTINUE_MOIS = 6;   // Maximum 6 mois de stage continu
+const DELAI_RENOUVELLEMENT_JOURS = 7; // Renouvellement possible à partir d'une semaine avant la fin du stage
 const REPOS_OBLIGATOIRE_MOIS = 1;    // 1 mois de repos minimum après 6 mois
 
 // =====================================================
@@ -319,9 +321,8 @@ const getMesDemandesStage = async (candidatId) => {
         required: false,
         attributes: [
           'idrenouvellement', 'statusRenouvellement', 'motifRefus',
-          'lettreNonConforme', 'conventionNonConforme',
+          'lettreNonConforme',
           'lettreMotivationRenouvellement_filename',
-          'conventionStageEnCours_filename',
           'stage_nouveau_idstage',
         ],
         include: [
@@ -330,6 +331,14 @@ const getMesDemandesStage = async (candidatId) => {
             as: 'stageNouveau',
             required: false,
             attributes: ['idstage', 'dateDebutEffective', 'dateFinEffective', 'statusStage'],
+            // Convention du renouvellement = celle jointe par l'agent/admin sur le nouveau stage
+            include: [{
+              model: DocumentStage,
+              as: 'documents',
+              where: { typeDocument: 'CONVENTION', del: 0 },
+              required: false,
+              attributes: ['document_filename'],
+            }],
           },
         ],
       },
@@ -372,7 +381,7 @@ const getMesDemandesStage = async (candidatId) => {
     }
   }
 
-  return stages.map(stage => {
+  const items = stages.map(stage => {
     // Verifier si une convention existe
     const convention = stage.documents && stage.documents.length > 0 ? stage.documents[0] : null;
 
@@ -422,9 +431,8 @@ const getMesDemandesStage = async (candidatId) => {
           statusRenouvellement: r.statusRenouvellement,
           motifRefus: r.motifRefus,
           lettreNonConforme: !!r.lettreNonConforme,
-          conventionNonConforme: !!r.conventionNonConforme,
           lettreFilename: r.lettreMotivationRenouvellement_filename,
-          conventionFilename: r.conventionStageEnCours_filename,
+          conventionFilename: r.stageNouveau?.documents?.[0]?.document_filename || null,
           stageNouveauId: r.stage_nouveau_idstage || null,
           stageNouveauDateDebut: r.stageNouveau?.dateDebutEffective || null,
           stageNouveauDateFin: r.stageNouveau?.dateFinEffective || null,
@@ -433,6 +441,15 @@ const getMesDemandesStage = async (candidatId) => {
       })(),
     };
   });
+
+  // Le renouvellement prolonge le stage initial : statut « PROLONGE » et durée totale (comme côté admin)
+  await enrichirAvecChaine(items);
+
+  // Rapport : un seul point d'entrée, sur la demande de stage initiale (racine de la chaîne)
+  for (const item of items) {
+    item.rapportInfo = item.stage_parent_idstage ? null : await getEtatRapportChaine(item.idstage, candidatId);
+  }
+  return items;
 };
 
 /**
@@ -652,10 +669,69 @@ const findAllChainMembers = async (rootId, candidatId) => {
   return members;
 };
 
+// Stages d'une chaîne encore « vivants » : la chaîne n'est pas terminée tant qu'il en reste un
+// (renouvellement demandé, en traitement, approuvé, accepté, en cours ou suspendu).
+const STATUTS_CHAINE_ACTIVE = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS', 'ACCEPTE', 'EN_COURS', 'SUSPENDU'];
+// Stages qui ne comptent pas dans la chaîne (demande refusée ou annulée)
+const STATUTS_HORS_CHAINE = ['REJETE', 'ANNULE'];
+// Stages finis (rapport possible)
+const STATUTS_FINIS = ['EXPIRE', 'TERMINE'];
+
 /**
- * Soumettre un rapport de stage.
- * Le rapport est toujours attaché au stage racine de la chaîne afin
- * qu'il soit partagé entre le stage initial et ses renouvellements.
+ * État du rapport pour une chaîne (stage initial + renouvellements) — règle unique utilisée
+ * à la fois pour la soumission et pour l'affichage du bouton côté candidat.
+ *
+ * Un seul rapport par chaîne, porté par le stage racine. Il ne peut être soumis qu'après la
+ * fin du dernier stage de la chaîne (aucun renouvellement actif, dernier stage expiré/terminé),
+ * sauf autorisation accordée par l'administration (soumission anticipée, comme l'autorisation
+ * de renouvellement).
+ *
+ * @returns {Promise<{ peutSoumettre: boolean, message: string|null, rapportExiste: boolean,
+ *   autorisation: { id: number, expiresAt: Date }|null, finChaine: string|null }>}
+ */
+const getEtatRapportChaine = async (rootId, candidatId) => {
+  const root = await Stage.findOne({ where: { idstage: rootId, candidats_idcandidats: candidatId, del: 0 } });
+  if (!root) throw new Error('Stage non trouvé ou accès non autorisé');
+
+  const rapport = await RapportStage.findOne({ where: { stage_idstage: rootId, del: 0 }, attributes: ['idrapport'] });
+  if (rapport) {
+    return { peutSoumettre: false, message: 'Le rapport de ce stage a déjà été soumis.', rapportExiste: true, autorisation: null, finChaine: null };
+  }
+
+  const membres = [root, ...(await findAllChainMembers(rootId, candidatId))]
+    .filter(s => !STATUTS_HORS_CHAINE.includes(s.statusStage));
+  const actifs = membres.filter(s => STATUTS_CHAINE_ACTIVE.includes(s.statusStage));
+  // Dernier stage de la chaîne = celui qui se termine le plus tard
+  const dernier = membres.reduce((acc, s) =>
+    (!acc || String(s.dateFinEffective || '') > String(acc.dateFinEffective || '')) ? s : acc, null);
+  const finChaine = dernier?.dateFinEffective || null;
+
+  const autorisation = await AutorisationRapportStage.findOne({
+    where: { stage_idstage: rootId, del: 0, usedAt: null, expiresAt: { [Op.gt]: new Date() } },
+    attributes: ['id', 'expiresAt'],
+  });
+  if (autorisation) {
+    return { peutSoumettre: true, message: null, rapportExiste: false, autorisation: autorisation.toJSON(), finChaine };
+  }
+
+  const fmt = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '';
+  if (actifs.length > 0) {
+    const renouvellementActif = actifs.some(s => s.stage_parent_idstage);
+    const message = renouvellementActif
+      ? `Votre stage est prolongé${finChaine ? ` jusqu'au ${fmt(finChaine)}` : ''} : vous soumettrez votre rapport à la fin du renouvellement.`
+      : `Vous pourrez soumettre votre rapport à la fin de votre stage${finChaine ? ` (${fmt(finChaine)})` : ''}.`;
+    return { peutSoumettre: false, message, rapportExiste: false, autorisation: null, finChaine };
+  }
+  if (dernier && STATUTS_FINIS.includes(dernier.statusStage)) {
+    return { peutSoumettre: true, message: null, rapportExiste: false, autorisation: null, finChaine };
+  }
+  return { peutSoumettre: false, message: 'Le rapport n\'est pas encore disponible pour ce stage.', rapportExiste: false, autorisation: null, finChaine };
+};
+
+/**
+ * Soumettre le rapport de stage — point d'entrée unique pour la demande de stage et ses
+ * renouvellements. Quel que soit le stage de la chaîne transmis, le rapport est attaché au
+ * stage racine et la règle de getEtatRapportChaine s'applique.
  */
 const soumettreRapportStage = async (candidatId, stageId, data, file) => {
   // Vérifier que le stage existe et appartient au candidat
@@ -664,30 +740,10 @@ const soumettreRapportStage = async (candidatId, stageId, data, file) => {
   });
   if (!stage) throw new Error('Stage non trouvé ou accès non autorisé');
 
-  // Vérifier que le stage est en cours, terminé ou expiré
-  const statutsValides = ['EN_COURS', 'TERMINE', 'EXPIRE'];
-  if (!statutsValides.includes(stage.statusStage)) {
-    throw new Error(`Le rapport ne peut être soumis que pour un stage en cours, terminé ou expiré. Statut actuel: ${stage.statusStage}`);
-  }
-
-  // Bloquer si un renouvellement actif est en attente de décision sur ce stage
-  const renouvActif = await RenouvellementStage.findOne({
-    where: {
-      stage_actuel_idstage: stageId,
-      statusRenouvellement: { [Op.in]: ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS'] },
-      del: 0,
-    },
-  });
-  if (renouvActif) {
-    throw new Error('Vous ne pouvez pas soumettre votre rapport tant qu\'une demande de renouvellement est en cours de traitement. Attendez la décision sur votre renouvellement avant de soumettre le rapport.');
-  }
-
-  // Trouver la racine de la chaîne — le rapport est toujours porté par le stage initial
+  // Le rapport est toujours porté par le stage initial de la chaîne
   const root = await findChainRoot(stageId);
-
-  // Vérifier qu'aucun rapport n'existe déjà sur la racine
-  const rapportExistant = await RapportStage.findOne({ where: { stage_idstage: root.idstage, del: 0 } });
-  if (rapportExistant) throw new Error('Un rapport a déjà été soumis pour ce stage');
+  const etat = await getEtatRapportChaine(root.idstage, candidatId);
+  if (!etat.peutSoumettre) throw new Error(etat.message || 'Le rapport ne peut pas être soumis pour le moment');
 
   if (!file?.buffer) throw new Error('Le fichier du rapport est obligatoire');
 
@@ -707,22 +763,31 @@ const soumettreRapportStage = async (candidatId, stageId, data, file) => {
       createdDate: new Date(),
     });
 
-    // Passer tous les stages de la chaîne à RAPPORT_SOUMIS
+    // Passer à RAPPORT_SOUMIS les stages finis de la chaîne. Un stage encore en cours
+    // (soumission anticipée autorisée par l'administration) n'est pas interrompu.
     const chainMembers = await findAllChainMembers(root.idstage, candidatId);
-    const allIds = [root.idstage, ...chainMembers.map(s => s.idstage)];
-    await Stage.update({ statusStage: 'RAPPORT_SOUMIS' }, { where: { idstage: { [Op.in]: allIds } } });
+    const finisIds = [root, ...chainMembers]
+      .filter(s => STATUTS_FINIS.includes(s.statusStage))
+      .map(s => s.idstage);
+    if (finisIds.length > 0) {
+      await Stage.update({ statusStage: 'RAPPORT_SOUMIS' }, { where: { idstage: { [Op.in]: finisIds } } });
+      // Les renouvellements dont le stage est fini passent TERMINE (jamais un renouvellement en cours)
+      await RenouvellementStage.update(
+        { statusRenouvellement: 'TERMINE' },
+        {
+          where: {
+            stage_nouveau_idstage: { [Op.in]: finisIds },
+            statusRenouvellement: { [Op.in]: ['EN_COURS', 'ACCEPTE', 'EXPIRE'] },
+            del: 0,
+          },
+        }
+      );
+    }
 
-    // Marquer TERMINE tout renouvellement actif dont le nouveau stage fait partie de la chaîne
-    await RenouvellementStage.update(
-      { statusRenouvellement: 'TERMINE' },
-      {
-        where: {
-          stage_nouveau_idstage: { [Op.in]: allIds },
-          statusRenouvellement: { [Op.in]: ['EN_COURS', 'ACCEPTE'] },
-          del: 0,
-        },
-      }
-    );
+    // Consommer l'autorisation de soumission anticipée, le cas échéant
+    if (etat.autorisation) {
+      await AutorisationRapportStage.update({ usedAt: new Date() }, { where: { id: etat.autorisation.id } });
+    }
 
     return {
       idrapport: rapport.idrapport,
@@ -778,7 +843,7 @@ const getConventionPourRenouvellement = async (candidatId, stageId) => {
     }
   }
 
-  // Vérifier la fenêtre de renouvellement (2 semaines avant la fin) — uniquement pour EN_COURS
+  // Vérifier la fenêtre de renouvellement (DELAI_RENOUVELLEMENT_JOURS avant la fin) — uniquement pour EN_COURS
   if (!estFinished) {
     if (!stage.dateFinEffective) {
       throw new Error('Date de fin du stage non définie');
@@ -788,11 +853,11 @@ const getConventionPourRenouvellement = async (candidatId, stageId) => {
     dateFin.setHours(0, 0, 0, 0);
     const aujourdhui = new Date();
     aujourdhui.setHours(0, 0, 0, 0);
-    const deuxSemainesAvant = new Date(dateFin);
-    deuxSemainesAvant.setDate(deuxSemainesAvant.getDate() - 14);
+    const debutFenetre = new Date(dateFin);
+    debutFenetre.setDate(debutFenetre.getDate() - DELAI_RENOUVELLEMENT_JOURS);
 
-    if (aujourdhui < deuxSemainesAvant) {
-      const joursRestants = Math.ceil((deuxSemainesAvant - aujourdhui) / (1000 * 60 * 60 * 24));
+    if (aujourdhui < debutFenetre) {
+      const joursRestants = Math.ceil((debutFenetre - aujourdhui) / (1000 * 60 * 60 * 24));
       throw new Error(`Le renouvellement sera disponible dans ${joursRestants} jours`);
     }
 
@@ -843,7 +908,7 @@ const getConventionPourRenouvellement = async (candidatId, stageId) => {
 
 /**
  * Demander le renouvellement d'un stage
- * Disponible uniquement 2 semaines avant la fin du stage
+ * Disponible uniquement une semaine avant la fin du stage
  * @param {number} candidatId
  * @param {number} stageId
  * @param {object} data - { dureeDemandee }
@@ -896,11 +961,11 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
     dateFin.setHours(0, 0, 0, 0);
     const aujourdhui = new Date();
     aujourdhui.setHours(0, 0, 0, 0);
-    const deuxSemainesAvant = new Date(dateFin);
-    deuxSemainesAvant.setDate(deuxSemainesAvant.getDate() - 14);
+    const debutFenetre = new Date(dateFin);
+    debutFenetre.setDate(debutFenetre.getDate() - DELAI_RENOUVELLEMENT_JOURS);
 
-    if (aujourdhui < deuxSemainesAvant) {
-      const joursRestants = Math.ceil((deuxSemainesAvant - aujourdhui) / (1000 * 60 * 60 * 24));
+    if (aujourdhui < debutFenetre) {
+      const joursRestants = Math.ceil((debutFenetre - aujourdhui) / (1000 * 60 * 60 * 24));
       throw new Error(`Le renouvellement sera disponible dans ${joursRestants} jours`);
     }
 
@@ -948,15 +1013,26 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Ne pas copier la convention du stage parent — la convention du renouvellement
-  // sera celle que l'admin uploadera lors de l'acceptation (document_stage du stage_nouveau).
-  const conventionDoc = null;
-
   const dureeDemandee = parseInt(data.dureeDemandee) || stage.dureeStage;
 
   // Le renouvellement commence le lendemain de la fin du stage actuel (dateFin est le dernier jour actif)
   const dateDebutRenouvellement = new Date(stage.dateFinEffective);
   dateDebutRenouvellement.setDate(dateDebutRenouvellement.getDate() + 1);
+
+  // Le renouvellement reprend la direction/service de la demande de stage d'origine :
+  // si le stage actuel n'en a pas (ancien renouvellement incomplet), on remonte la chaîne.
+  let directionId = stage.direction_iddirection;
+  let serviceId = stage.service_idservice;
+  if (!directionId && stage.stage_parent_idstage) {
+    let parentId = stage.stage_parent_idstage;
+    while (parentId && !directionId) {
+      const parent = await Stage.findOne({ where: { idstage: parentId, del: 0 } });
+      if (!parent) break;
+      directionId = parent.direction_iddirection;
+      serviceId = serviceId || parent.service_idservice;
+      parentId = parent.stage_parent_idstage;
+    }
+  }
 
   // Créer une nouvelle demande de stage comme renouvellement
   const nouveauStage = await Stage.create({
@@ -970,38 +1046,40 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
     estRenouvellement: 1,
     stage_parent_idstage: stageId,
     // Reconduire la direction et le service d'origine
-    direction_iddirection: stage.direction_iddirection,
-    service_idservice: stage.service_idservice,
-    // Copier les documents du stage parent
+    direction_iddirection: directionId,
+    service_idservice: serviceId,
+    // Copier les documents du stage parent (chemin disque + BLOB legacy)
     cv: stage.cv,
+    cv_path: stage.cv_path,
     cv_filename: stage.cv_filename,
     cv_size: stage.cv_size,
     cnib: stage.cnib,
+    cnib_path: stage.cnib_path,
     cnib_filename: stage.cnib_filename,
     cnib_size: stage.cnib_size,
     casierJudiciaire: stage.casierJudiciaire,
+    casierJudiciaire_path: stage.casierJudiciaire_path,
     casierJudiciaire_filename: stage.casierJudiciaire_filename,
     casierJudiciaire_size: stage.casierJudiciaire_size,
     lettreMotivation: stage.lettreMotivation,
+    lettreMotivation_path: stage.lettreMotivation_path,
     lettreMotivation_filename: stage.lettreMotivation_filename,
     lettreMotivation_size: stage.lettreMotivation_size,
     lettreRecommandation: stage.lettreRecommandation,
+    lettreRecommandation_path: stage.lettreRecommandation_path,
     lettreRecommandation_filename: stage.lettreRecommandation_filename,
     lettreRecommandation_size: stage.lettreRecommandation_size,
   });
 
-  // Créer l'entrée dans renouvellement_stage avec la lettre et la convention récupérée
+  // Créer l'entrée dans renouvellement_stage avec la lettre du candidat.
+  // La convention du renouvellement est jointe plus tard par l'agent/admin (document_stage).
   const renouvellementCreated = await RenouvellementStage.create({
     stage_actuel_idstage: stageId,
     stage_nouveau_idstage: nouveauStage.idstage,
-    lettreMotivationRenouvellement: file.buffer,
+    lettreMotivationRenouvellement: null,
+    lettreMotivationRenouvellement_path: fileStorage.saveFile(file.buffer, file.originalname, 'renouvellements'),
     lettreMotivationRenouvellement_filename: file.originalname,
     lettreMotivationRenouvellement_size: file.size,
-    // Copier la convention depuis document_stage si elle existe
-    conventionStageEnCours: conventionDoc ? conventionDoc.document : null,
-    conventionStageEnCours_path: conventionDoc ? conventionDoc.document_path : null,
-    conventionStageEnCours_filename: conventionDoc ? conventionDoc.document_filename : null,
-    conventionStageEnCours_size: conventionDoc ? conventionDoc.document_size : null,
     dureeDemandee: dureeDemandee,
     statusRenouvellement: 'EN_ATTENTE',
   });
@@ -1023,7 +1101,6 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
     statusStage: nouveauStage.statusStage,
     estRenouvellement: nouveauStage.estRenouvellement,
     stageParentId: stageId,
-    conventionJointe: !!conventionDoc,
     createdDate: nouveauStage.createdDate,
   };
 };
@@ -1065,8 +1142,8 @@ const getMesRenouvellements = async (candidatId) => {
       'idrenouvellement', 'statusRenouvellement', 'motifRefus',
       'dureeDemandee', 'dateRenouvellement',
       'createdBy', 'lastModifiedBy', 'lastModifiedDate',
-      'lettreNonConforme', 'conventionNonConforme',
-      'lettreMotivationRenouvellement_filename', 'conventionStageEnCours_filename',
+      'lettreNonConforme',
+      'lettreMotivationRenouvellement_filename',
     ],
     include: [
       {
@@ -1081,6 +1158,14 @@ const getMesRenouvellements = async (candidatId) => {
         as: 'stageNouveau',
         required: false,
         attributes: ['idstage', 'domaineStage', 'typeStage', 'dateDebutEffective', 'dateFinEffective', 'statusStage'],
+        // Convention du renouvellement = celle jointe par l'agent/admin sur le nouveau stage
+        include: [{
+          model: DocumentStage,
+          as: 'documents',
+          where: { typeDocument: 'CONVENTION', del: 0 },
+          required: false,
+          attributes: ['document_filename'],
+        }],
       },
     ],
     order: [['dateRenouvellement', 'DESC']],
@@ -1096,9 +1181,8 @@ const getMesRenouvellements = async (candidatId) => {
     lastModifiedBy: r.lastModifiedBy,
     lastModifiedDate: r.lastModifiedDate,
     lettreNonConforme: r.lettreNonConforme,
-    conventionNonConforme: r.conventionNonConforme,
     lettreMotivationFilename: r.lettreMotivationRenouvellement_filename,
-    conventionFilename: r.conventionStageEnCours_filename,
+    conventionFilename: r.stageNouveau?.documents?.[0]?.document_filename || null,
     stageActuel: r.stageActuel ? {
       idstage: r.stageActuel.idstage,
       domaine: r.stageActuel.domaineStage,
@@ -1130,6 +1214,7 @@ module.exports = {
   getMesDemandesStage,
   soumettreDemandeStage,
   soumettreRapportStage,
+  getEtatRapportChaine,
   getRapportByStageId,
   getConventionPourRenouvellement,
   demanderRenouvellement,

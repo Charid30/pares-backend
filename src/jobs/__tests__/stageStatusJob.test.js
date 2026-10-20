@@ -3,7 +3,7 @@
 // Logique sensible aux fuseaux/bornes de date, qui tourne sans supervision humaine —
 // une erreur silencieuse ici fait dériver le statut réel de centaines de stages.
 const { resetDb } = require('../../__tests__/helpers/testDb');
-const { Direction, Service, Stage } = require('../../models');
+const { Direction, Service, Stage, DocumentStage } = require('../../models');
 const { creerCandidat } = require('../../__tests__/helpers/fixtures');
 const { activerStagesAcceptes, expirerStagesEnCours, updateAllStageStatuses } = require('../stageStatusJob');
 
@@ -33,6 +33,13 @@ const creerStage = async (direction, service, overrides = {}) => {
   });
 };
 
+// Un stage n'est activé par le cron que si sa convention est jointe
+const joindreConvention = (stage) => DocumentStage.create({
+  stage_idstage: stage.idstage, typeDocument: 'CONVENTION',
+  document_path: 'uploads/documents-stage/c.pdf', document_filename: 'c.pdf', document_size: 1,
+  dateEmission: '2026-01-01',
+});
+
 beforeEach(async () => {
   await resetDb();
 });
@@ -41,6 +48,7 @@ describe('activerStagesAcceptes', () => {
   test('active un stage ACCEPTE dont la date de début est aujourd\'hui', async () => {
     const { direction, service } = await creerDirectionEtService();
     const stage = await creerStage(direction, service, { statusStage: 'ACCEPTE', dateDebutEffective: isoDansNJours(0) });
+    await joindreConvention(stage);
 
     const count = await activerStagesAcceptes();
 
@@ -52,6 +60,7 @@ describe('activerStagesAcceptes', () => {
   test('active un stage ACCEPTE dont la date de début est dans le passé', async () => {
     const { direction, service } = await creerDirectionEtService();
     const stage = await creerStage(direction, service, { statusStage: 'ACCEPTE', dateDebutEffective: isoDansNJours(-3) });
+    await joindreConvention(stage);
 
     await activerStagesAcceptes();
 
@@ -62,6 +71,17 @@ describe('activerStagesAcceptes', () => {
   test('ne touche pas un stage ACCEPTE dont la date de début est dans le futur', async () => {
     const { direction, service } = await creerDirectionEtService();
     const stage = await creerStage(direction, service, { statusStage: 'ACCEPTE', dateDebutEffective: isoDansNJours(5) });
+
+    const count = await activerStagesAcceptes();
+
+    expect(count).toBe(0);
+    await stage.reload();
+    expect(stage.statusStage).toBe('ACCEPTE');
+  });
+
+  test('ne touche pas un stage ACCEPTE sans convention, même avec une date de début passée', async () => {
+    const { direction, service } = await creerDirectionEtService();
+    const stage = await creerStage(direction, service, { statusStage: 'ACCEPTE', dateDebutEffective: isoDansNJours(-3) });
 
     const count = await activerStagesAcceptes();
 
@@ -130,11 +150,12 @@ describe('updateAllStageStatuses', () => {
   test('applique les deux transitions en une seule passe', async () => {
     const { direction, service } = await creerDirectionEtService();
     const aActiver = await creerStage(direction, service, { statusStage: 'ACCEPTE', dateDebutEffective: isoDansNJours(-1) });
+    await joindreConvention(aActiver);
     const aExpirer = await creerStage(direction, service, { statusStage: 'EN_COURS', dateFinEffective: isoDansNJours(-1) });
 
     const result = await updateAllStageStatuses();
 
-    expect(result).toEqual({ activated: 1, expired: 1 });
+    expect(result).toMatchObject({ activated: 1, expired: 1 });
     await aActiver.reload();
     await aExpirer.reload();
     expect(aActiver.statusStage).toBe('EN_COURS');

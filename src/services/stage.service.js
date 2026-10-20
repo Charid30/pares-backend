@@ -6,6 +6,7 @@ const {
   DocumentStage,
   DemandeModificationStage,
   AutorisationRenouvellementStage,
+  AutorisationRapportStage,
   Candidat,
   Agent,
   Service,
@@ -44,6 +45,22 @@ const assertAgentOwnsDirection = async (agentContext, directionId) => {
   if (!directionId || !directionIds.includes(directionId)) {
     throw new Error('Action non autorisée : ce stage ne relève pas de votre direction');
   }
+};
+
+/**
+ * Statut d'un stage ACCEPTE une fois sa convention jointe : EN_COURS si la date de
+ * début effective est atteinte (aujourd'hui ou passée), sinon il reste ACCEPTE.
+ * Sans date de début connue, on garde l'ancien comportement (EN_COURS).
+ * @param {string|Date|null} dateDebutEffective
+ */
+const statutApresConvention = (dateDebutEffective) => {
+  if (!dateDebutEffective) return 'EN_COURS';
+  const debut = dateDebutEffective instanceof Date
+    ? dateDebutEffective.toISOString().slice(0, 10)
+    : String(dateDebutEffective).slice(0, 10);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return debut <= today ? 'EN_COURS' : 'ACCEPTE';
 };
 
 // =====================================================
@@ -318,6 +335,7 @@ const getAllStages = async (filters = {}, agentContext = null) => {
     json.peutAgir = calculerPeutAgir(json.direction_iddirection, { agentContext, agentDirectionIds });
     return json;
   });
+  await enrichirAvecChaine(items);
 
   // Statistiques par statut, scopées comme la liste (direction de l'agent le cas échéant)
   // mais SANS le filtre statusStage de l'écran courant — sinon les cartes "Total / En attente /
@@ -349,8 +367,101 @@ const getAllStages = async (filters = {}, agentContext = null) => {
   };
 };
 
+// Statuts d'un renouvellement qui prolonge encore la chaîne (la demande initiale n'est pas finie)
+const STATUTS_RENOUVELLEMENT_ACTIF = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS', 'ACCEPTE', 'EN_COURS', 'SUSPENDU'];
+
 /**
- * Stages archivés : stages racines (sans parent) ayant expiré.
+ * IDs des stages racines dont au moins un renouvellement (à n'importe quel niveau de la
+ * chaîne) est encore actif. Le renouvellement prolonge le stage initial : tant qu'il est
+ * actif, la demande initiale n'est pas terminée et ne doit pas être archivée.
+ */
+const getRacinesAvecRenouvellementActif = async () => {
+  const actifs = await Stage.findAll({
+    attributes: ['idstage', 'stage_parent_idstage'],
+    where: { del: 0, stage_parent_idstage: { [Op.ne]: null }, statusStage: { [Op.in]: STATUTS_RENOUVELLEMENT_ACTIF } },
+  });
+  const racines = new Set();
+  let aRemonter = actifs.map(s => s.stage_parent_idstage);
+  const vus = new Set();
+  // Remonte la chaîne niveau par niveau jusqu'aux stages sans parent
+  while (aRemonter.length > 0) {
+    const ids = [...new Set(aRemonter)].filter(id => !vus.has(id));
+    ids.forEach(id => vus.add(id));
+    if (ids.length === 0) break;
+    const parents = await Stage.findAll({ attributes: ['idstage', 'stage_parent_idstage'], where: { idstage: { [Op.in]: ids } } });
+    aRemonter = [];
+    for (const p of parents) {
+      if (p.stage_parent_idstage) aRemonter.push(p.stage_parent_idstage);
+      else racines.add(p.idstage);
+    }
+  }
+  return [...racines];
+};
+
+// Statuts d'un renouvellement réellement effectué (accepté, en cours ou fini) : compté dans la durée totale
+const STATUTS_RENOUVELLEMENT_EFFECTUE = ['ACCEPTE', 'EN_COURS', 'SUSPENDU', 'EXPIRE', 'TERMINE', 'RAPPORT_SOUMIS'];
+// Statuts d'un renouvellement qui fait du stage initial un stage « Prolongé »
+const STATUTS_PROLONGATION = ['ACCEPTE', 'EN_COURS', 'SUSPENDU'];
+
+/**
+ * Infos de chaîne pour des stages racines : le renouvellement prolonge le stage initial.
+ * - dureeTotaleMois : durée du stage + durées des renouvellements effectués
+ * - nbRenouvellements, finProlongation (date de fin du dernier renouvellement effectué)
+ * - prolonge : un renouvellement accepté / en cours prolonge actuellement le stage
+ * @param {{ idstage: number, dureeStage?: number }[]} racines
+ * @returns {Promise<Map<number, object>>}
+ */
+const getInfosChaines = async (racines) => {
+  const infos = new Map();
+  const racineDe = new Map();
+  for (const r of racines) {
+    infos.set(r.idstage, { dureeTotaleMois: r.dureeStage || 0, nbRenouvellements: 0, finProlongation: null, prolonge: false });
+    racineDe.set(r.idstage, r.idstage);
+  }
+  let niveau = racines.map(r => r.idstage);
+  while (niveau.length > 0) {
+    const enfants = await Stage.findAll({
+      attributes: ['idstage', 'stage_parent_idstage', 'statusStage', 'dureeStage', 'dateFinEffective'],
+      where: { del: 0, stage_parent_idstage: { [Op.in]: niveau } },
+    });
+    niveau = [];
+    for (const e of enfants) {
+      const racineId = racineDe.get(e.stage_parent_idstage);
+      racineDe.set(e.idstage, racineId);
+      niveau.push(e.idstage);
+      const info = infos.get(racineId);
+      if (STATUTS_PROLONGATION.includes(e.statusStage)) info.prolonge = true;
+      if (STATUTS_RENOUVELLEMENT_EFFECTUE.includes(e.statusStage)) {
+        info.dureeTotaleMois += e.dureeStage || 0;
+        info.nbRenouvellements += 1;
+        if (e.dateFinEffective && (!info.finProlongation || String(e.dateFinEffective) > String(info.finProlongation))) {
+          info.finProlongation = e.dateFinEffective;
+        }
+      }
+    }
+  }
+  return infos;
+};
+
+/**
+ * Ajoute à chaque stage racine (JSON) ses infos de chaîne et le statut affiché :
+ * un stage expiré dont un renouvellement est en cours s'affiche « PROLONGE ».
+ */
+const enrichirAvecChaine = async (items) => {
+  const racines = items.filter(s => !s.stage_parent_idstage);
+  if (racines.length === 0) return items;
+  const infos = await getInfosChaines(racines);
+  for (const s of racines) {
+    const info = infos.get(s.idstage);
+    s.chaine = info;
+    s.statutAffiche = (info.prolonge && ['EXPIRE', 'TERMINE', 'RAPPORT_SOUMIS'].includes(s.statusStage)) ? 'PROLONGE' : s.statusStage;
+  }
+  return items;
+};
+
+/**
+ * Stages archivés : stages racines (sans parent) ayant expiré, dont la chaîne de
+ * renouvellements est terminée (aucun renouvellement encore actif).
  * Les stages issus de renouvellements restent visibles dans la section Renouvellements.
  */
 const getStagesArchives = async (filters = {}, agentContext = null) => {
@@ -358,6 +469,8 @@ const getStagesArchives = async (filters = {}, agentContext = null) => {
   const offset = (page - 1) * limit;
 
   const where = { del: 0, statusStage: 'EXPIRE', stage_parent_idstage: null };
+  const prolonges = await getRacinesAvecRenouvellementActif();
+  if (prolonges.length > 0) where.idstage = { [Op.notIn]: prolonges };
 
   if (typeStage)     where.typeStage    = typeStage;
   if (domaineStage)  where.domaineStage = { [Op.like]: `%${domaineStage}%` };
@@ -416,6 +529,7 @@ const getStagesArchives = async (filters = {}, agentContext = null) => {
     json.peutAgir = calculerPeutAgir(json.direction_iddirection, { agentContext, agentDirectionIds });
     return json;
   });
+  await enrichirAvecChaine(items);
 
   return {
     items,
@@ -443,15 +557,19 @@ const getDomainesDistincts = async () => {
  * Obtenir les statistiques des stages
  */
 const getStagesStats = async () => {
-  const total = await Stage.count({ where: { del: 0 } });
-  const enAttente = await Stage.count({ where: { del: 0, statusStage: 'EN_ATTENTE' } });
-  const enCoursDeTraitement = await Stage.count({ where: { del: 0, statusStage: 'EN_COURS_DE_TRAITEMENT' } });
-  const acceptes = await Stage.count({ where: { del: 0, statusStage: 'ACCEPTE' } });
-  const enCours = await Stage.count({ where: { del: 0, statusStage: 'EN_COURS' } });
-  const termines = await Stage.count({ where: { del: 0, statusStage: 'TERMINE' } });
-  const expires = await Stage.count({ where: { del: 0, statusStage: 'EXPIRE' } });
-  const rejetes = await Stage.count({ where: { del: 0, statusStage: 'REJETE' } });
-  const rapportsSoumis = await Stage.count({ where: { del: 0, statusStage: 'RAPPORT_SOUMIS' } });
+  // Uniquement les demandes de stage : un renouvellement crée un stage enfant
+  // (stage_parent_idstage renseigné) qui est compté dans les Renouvellements, pas ici
+  // — même périmètre que la liste getAllStages.
+  const base = { del: 0, stage_parent_idstage: null };
+  const total = await Stage.count({ where: base });
+  const enAttente = await Stage.count({ where: { ...base, statusStage: 'EN_ATTENTE' } });
+  const enCoursDeTraitement = await Stage.count({ where: { ...base, statusStage: 'EN_COURS_DE_TRAITEMENT' } });
+  const acceptes = await Stage.count({ where: { ...base, statusStage: 'ACCEPTE' } });
+  const enCours = await Stage.count({ where: { ...base, statusStage: 'EN_COURS' } });
+  const termines = await Stage.count({ where: { ...base, statusStage: 'TERMINE' } });
+  const expires = await Stage.count({ where: { ...base, statusStage: 'EXPIRE' } });
+  const rejetes = await Stage.count({ where: { ...base, statusStage: 'REJETE' } });
+  const rapportsSoumis = await Stage.count({ where: { ...base, statusStage: 'RAPPORT_SOUMIS' } });
 
   return {
     total,
@@ -558,6 +676,18 @@ const getStageById = async (id, user = null) => {
         },
         attributes: ['id', 'expiresAt', 'autorisePar'],
       },
+      // Autorisation de soumission anticipée du rapport (admin → candidat), portée par la racine
+      {
+        model: AutorisationRapportStage,
+        as: 'autorisationsRapport',
+        required: false,
+        where: {
+          del: 0,
+          usedAt: null,
+          expiresAt: { [Op.gt]: new Date() },
+        },
+        attributes: ['id', 'expiresAt', 'autorisePar'],
+      },
     ],
   });
 
@@ -598,6 +728,9 @@ const getStageById = async (id, user = null) => {
       parentId = parent.stage_parent_idstage;
     }
   }
+
+  // Stage initial : durée totale (stage + renouvellements) et statut « Prolongé »
+  await enrichirAvecChaine([stageData]);
 
   return stageData;
 };
@@ -953,11 +1086,14 @@ const downloadStageDocument = async (id, documentType, user = null) => {
 /**
  * Remplacer la convention de stage existante par une nouvelle version
  */
-const remplacerConventionStage = async (stageId, agentId, file) => {
+const remplacerConventionStage = async (stageId, agentId, file, agentContext = null) => {
   if (!file) throw new Error('Le fichier PDF est requis');
 
   const stage = await Stage.findOne({ where: { idstage: stageId, del: 0 } });
   if (!stage) throw new Error('Stage non trouvé');
+
+  // Un agent ne peut remplacer que la convention d'un stage de sa direction
+  await assertAgentOwnsDirection(agentContext, stage.direction_iddirection);
 
   const ancienneConvention = await DocumentStage.findOne({
     where: { stage_idstage: stageId, typeDocument: 'CONVENTION', del: 0 },
@@ -1045,75 +1181,17 @@ const hasConvention = async (stageId) => {
 // =====================================================
 
 /**
- * Créer une demande de renouvellement
- */
-const createRenouvellement = async (candidatId, data, files) => {
-  // Vérifier que le stage actuel existe et appartient au candidat
-  const stageActuel = await Stage.findOne({
-    where: { 
-      idstage: data.stage_actuel_idstage,
-      candidats_idcandidats: candidatId,
-      statusStage: 'EN_COURS',
-      del: 0,
-    },
-  });
-  
-  if (!stageActuel) {
-    throw new Error('Stage actuel non trouvé ou non éligible au renouvellement');
-  }
-  
-  // Créer le nouveau stage
-  const nouveauStage = await Stage.create({
-    candidats_idcandidats: candidatId,
-    stage_parent_idstage: data.stage_actuel_idstage,
-    typeStage: stageActuel.typeStage,
-    niveau: stageActuel.niveau,
-    domaineStage: stageActuel.domaineStage,
-    dureeStage: data.dureeDemandee,
-    dureeStageSouhaitee: data.dureeDemandee,
-    dateDebutSouhaitee: new Date(),
-    statusStage: 'EN_ATTENTE',
-    estRenouvellement: 1,
-  });
-  
-  // Créer la demande de renouvellement
-  const renouvellementData = {
-    stage_actuel_idstage: data.stage_actuel_idstage,
-    stage_nouveau_idstage: nouveauStage.idstage,
-    dureeDemandee: data.dureeDemandee,
-    statusRenouvellement: 'EN_ATTENTE',
-  };
-  
-  if (files.lettreMotivationRenouvellement) {
-    renouvellementData.lettreMotivationRenouvellement_path = fileStorage.saveFile(files.lettreMotivationRenouvellement.buffer, files.lettreMotivationRenouvellement.originalname, 'renouvellements');
-    renouvellementData.lettreMotivationRenouvellement = null;
-    renouvellementData.lettreMotivationRenouvellement_filename = files.lettreMotivationRenouvellement.originalname;
-    renouvellementData.lettreMotivationRenouvellement_size = files.lettreMotivationRenouvellement.size;
-  }
-
-  if (files.conventionStageEnCours) {
-    renouvellementData.conventionStageEnCours_path = fileStorage.saveFile(files.conventionStageEnCours.buffer, files.conventionStageEnCours.originalname, 'renouvellements');
-    renouvellementData.conventionStageEnCours = null;
-    renouvellementData.conventionStageEnCours_filename = files.conventionStageEnCours.originalname;
-    renouvellementData.conventionStageEnCours_size = files.conventionStageEnCours.size;
-  }
-  
-  const renouvellement = await RenouvellementStage.create(renouvellementData);
-  
-  return {
-    renouvellement,
-    nouveauStage,
-  };
-};
-
-/**
  * Obtenir tous les renouvellements — avec pagination et auto-sync du statut.
  *
  * Auto-sync : lorsque statusRenouvellement = ACCEPTE (ou EN_COURS), on vérifie
  * le statusStage du nouveau stage et on met à jour le statut du renouvellement
  * pour refléter l'état réel (EN_COURS, EXPIRE, TERMINE).
+ *
+ * @param {object} [agentContext] - { agentId, isSystemRole, isActionSystemRole } — même logique
+ *   que getAllStages : un agent non-système ne voit que les renouvellements de ses directions
+ *   (direction du nouveau stage, reprise de la demande de stage d'origine).
  */
-const getAllRenouvellements = async (filters = {}) => {
+const getAllRenouvellements = async (filters = {}, agentContext = null) => {
   const { statusRenouvellement, page = 1, limit = 15, search, dateDebut, dateFin } = filters;
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
@@ -1130,6 +1208,23 @@ const getAllRenouvellements = async (filters = {}) => {
   }
 
   const STAGE_BLOBS = ['dernierDiplome', 'cv', 'cnib', 'casierJudiciaire', 'lettreMotivation', 'lettreRecommandation'];
+
+  // Directions de l'agent — filtrage de la liste (rôle non-système) et calcul de peutAgir
+  let agentDirectionIds = [];
+  if (agentContext && agentContext.agentId) {
+    const agent = await Agent.findByPk(agentContext.agentId, {
+      include: [
+        { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
+        { model: Direction, as: 'directionDirecte' },
+      ],
+    });
+    agentDirectionIds = getAgentDirectionIds(agent);
+  }
+
+  const filtreDirection = !!(agentContext && !agentContext.isSystemRole && agentContext.agentId);
+  const stageNouveauWhere = filtreDirection
+    ? { direction_iddirection: agentDirectionIds.length > 0 ? { [Op.in]: agentDirectionIds } : { [Op.eq]: -1 } }
+    : undefined;
 
   const candidatWhere = {};
   if (search) {
@@ -1158,18 +1253,30 @@ const getAllRenouvellements = async (filters = {}) => {
         model: Stage,
         as: 'stageActuel',
         attributes: { exclude: STAGE_BLOBS },
-        include: [{
-          model: Candidat,
-          as: 'candidat',
-          attributes: ['idcandidats', 'nom', 'prenom', 'email'],
-          ...(search ? { where: candidatWhere } : {}),
-          required: !!search,
-        }],
+        include: [
+          {
+            model: Candidat,
+            as: 'candidat',
+            attributes: ['idcandidats', 'nom', 'prenom', 'email', 'telephone'],
+            ...(search ? { where: candidatWhere } : {}),
+            required: !!search,
+          },
+          // Convention de la demande de stage (celle qui a validé le stage en cours)
+          {
+            model: DocumentStage,
+            as: 'documents',
+            where: { typeDocument: 'CONVENTION', del: 0 },
+            required: false,
+            attributes: ['iddocument', 'document_filename'],
+          },
+          { model: Direction, as: 'direction', attributes: ['iddirection', 'nom', 'accronyme'], required: false },
+        ],
       },
       {
         model: Stage,
         as: 'stageNouveau',
-        attributes: ['idstage', 'statusStage', 'dateDebutEffective', 'dateFinEffective'],
+        attributes: ['idstage', 'statusStage', 'dateDebutEffective', 'dateFinEffective', 'dureeStage', 'direction_iddirection'],
+        ...(filtreDirection ? { where: stageNouveauWhere, required: true } : {}),
         include: [{
           model: DocumentStage,
           as: 'documents',
@@ -1186,7 +1293,11 @@ const getAllRenouvellements = async (filters = {}) => {
   });
 
   // Auto-sync : synchroniser statusRenouvellement avec la progression du nouveau stage
+  // ACCEPTE est inclus : si l'admin repousse les dates du nouveau stage (date de début future),
+  // le stage repasse ACCEPTE et le renouvellement doit suivre ; à l'inverse un renouvellement
+  // EXPIRE dont la date de fin est prolongée redevient EN_COURS.
   const SYNC_MAP = {
+    ACCEPTE:        'ACCEPTE',
     EN_COURS:       'EN_COURS',
     EXPIRE:         'EXPIRE',
     TERMINE:        'TERMINE',
@@ -1195,31 +1306,47 @@ const getAllRenouvellements = async (filters = {}) => {
   for (const r of rows) {
     const stageStatus = r.stageNouveau?.statusStage;
     if (stageStatus && SYNC_MAP[stageStatus] && r.statusRenouvellement !== SYNC_MAP[stageStatus]) {
-      if (['ACCEPTE', 'EN_COURS'].includes(r.statusRenouvellement)) {
+      if (['ACCEPTE', 'EN_COURS', 'EXPIRE'].includes(r.statusRenouvellement)) {
         await r.update({ statusRenouvellement: SYNC_MAP[stageStatus] });
         r.statusRenouvellement = SYNC_MAP[stageStatus];
       }
     }
   }
 
-  // Compteurs par statut (hors pagination)
-  const [enAttente, enTraitement, accepte, enCours, expire, termine, rejete] = await Promise.all([
-    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EN_ATTENTE' } }),
-    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'PROGRAMMATION_EN_COURS' } }),
-    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'ACCEPTE' } }),
-    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EN_COURS' } }),
-    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'EXPIRE' } }),
-    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'TERMINE' } }),
-    RenouvellementStage.count({ where: { del: 0, statusRenouvellement: 'REJETE' } }),
+  // Compteurs par statut (hors pagination et hors filtres de l'écran), scopés par direction
+  // comme la liste — total = somme de tous les statuts, pour que les cartes soient cohérentes.
+  const compter = (statut) => RenouvellementStage.count({
+    where: { del: 0, ...(statut ? { statusRenouvellement: statut } : {}) },
+    ...(filtreDirection ? {
+      include: [{ model: Stage, as: 'stageNouveau', attributes: [], where: stageNouveauWhere, required: true }],
+    } : {}),
+  });
+  const [totalGlobal, enAttente, enTraitement, approuve, accepte, enCours, expire, termine, rejete] = await Promise.all([
+    compter(null),
+    compter('EN_ATTENTE'),
+    compter('EN_COURS_DE_TRAITEMENT'),
+    compter('PROGRAMMATION_EN_COURS'),
+    compter('ACCEPTE'),
+    compter('EN_COURS'),
+    compter('EXPIRE'),
+    compter('TERMINE'),
+    compter('REJETE'),
   ]);
 
+  // peutAgir : l'agent peut-il agir sur ce renouvellement (même règle que getAllStages)
+  const items = rows.map((r) => {
+    const json = r.toJSON();
+    json.peutAgir = calculerPeutAgir(json.stageNouveau?.direction_iddirection, { agentContext, agentDirectionIds });
+    return json;
+  });
+
   return {
-    rows,
+    rows: items,
     total: count,
     page:  parseInt(page),
     limit: parseInt(limit),
     totalPages: Math.ceil(count / parseInt(limit)),
-    stats: { enAttente, enTraitement, accepte, enCours, expire, termine, rejete },
+    stats: { total: totalGlobal, enAttente, enTraitement, approuve, accepte, enCours, expire, termine, rejete },
   };
 };
 
@@ -1287,6 +1414,61 @@ const approuverRenouvellement = async (id, agentContext = null) => {
   }
 
   return renouvellement.reload();
+};
+
+/**
+ * Mettre un renouvellement en traitement (EN_ATTENTE → EN_COURS_DE_TRAITEMENT) — bouton
+ * « Traiter » de l'administration, comme pour la demande de stage.
+ */
+const mettreEnTraitementRenouvellement = async (id, agentContext = null) => {
+  const renouvellement = await RenouvellementStage.findOne({
+    where: { idrenouvellement: id, del: 0 },
+    include: [{ model: Stage, as: 'stageNouveau', attributes: ['idstage', 'direction_iddirection'] }],
+  });
+
+  if (!renouvellement) throw new Error('Renouvellement non trouvé');
+  if (renouvellement.statusRenouvellement !== 'EN_ATTENTE') {
+    throw new Error(`Seul un renouvellement en attente peut être mis en traitement (statut actuel : ${renouvellement.statusRenouvellement})`);
+  }
+
+  await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
+
+  const nomAgent = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
+  await renouvellement.update({
+    statusRenouvellement: 'EN_COURS_DE_TRAITEMENT',
+    lastModifiedBy: nomAgent,
+    lastModifiedDate: new Date(),
+  });
+
+  return renouvellement.reload();
+};
+
+/**
+ * Télécharger la convention de la demande de stage à laquelle le renouvellement est
+ * rattaché (stage actuel) — c'est elle qui atteste que le stage en cours est validé.
+ * @param {number} renouvellementId
+ */
+const downloadConventionDemandeRenouvellement = async (renouvellementId) => {
+  const renouvellement = await RenouvellementStage.findOne({
+    where: { idrenouvellement: renouvellementId, del: 0 },
+    attributes: ['idrenouvellement', 'stage_actuel_idstage'],
+  });
+  if (!renouvellement) throw new Error('Demande de renouvellement non trouvée');
+
+  const conventionDoc = await DocumentStage.findOne({
+    where: { stage_idstage: renouvellement.stage_actuel_idstage, typeDocument: 'CONVENTION', del: 0 },
+    attributes: ['document', 'document_path', 'document_filename'],
+    order: [['iddocument', 'DESC']],
+  });
+  if (!conventionDoc) throw new Error('Aucune convention jointe à la demande de stage');
+
+  const buffer = fileStorage.readFile(conventionDoc.document_path, conventionDoc.document);
+  if (!buffer || buffer.length === 0) throw new Error('Fichier convention introuvable');
+
+  return {
+    buffer,
+    filename: conventionDoc.document_filename || `convention_stage_${renouvellement.stage_actuel_idstage}.pdf`,
+  };
 };
 
 /**
@@ -1384,7 +1566,7 @@ const supprimerRenouvellement = async (id, agentContext = null) => {
 
   if (!renouvellement) throw new Error('Renouvellement non trouvé');
 
-  const suppressibles = ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS', 'REJETE'];
+  const suppressibles = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS', 'REJETE'];
   if (!suppressibles.includes(renouvellement.statusRenouvellement)) {
     throw new Error(`Un renouvellement ${renouvellement.statusRenouvellement} ne peut pas être supprimé`);
   }
@@ -1396,8 +1578,7 @@ const supprimerRenouvellement = async (id, agentContext = null) => {
     deletedDate: new Date(),
   });
 
-  if (renouvellement.stageNouveau &&
-      ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS'].includes(renouvellement.stageNouveau.statusStage)) {
+  if (renouvellement.stageNouveau) {
     await renouvellement.stageNouveau.update({ del: 1, statusStage: 'ANNULE' });
   }
 
@@ -1425,14 +1606,18 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
     throw new Error('Renouvellement non trouvé');
   }
 
-  const statusValides = data.statusRenouvellement === 'REJETE'
-    ? ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS']
+  // Même circuit que la demande de stage : l'administration peut accepter dès EN_ATTENTE /
+  // EN_COURS_DE_TRAITEMENT ; un agent n'accepte qu'après approbation (PROGRAMMATION_EN_COURS).
+  // Le refus est possible à toutes les étapes avant décision.
+  const STATUTS_AVANT_DECISION = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'];
+  const statusValides = (data.statusRenouvellement === 'REJETE' || agentContext?.isAdmin)
+    ? STATUTS_AVANT_DECISION
     : ['PROGRAMMATION_EN_COURS'];
 
   if (!statusValides.includes(renouvellement.statusRenouvellement)) {
     throw new Error(
       data.statusRenouvellement === 'ACCEPTE'
-        ? `Le renouvellement doit être en cours de traitement pour être accepté (statut actuel : ${renouvellement.statusRenouvellement}).`
+        ? `Le renouvellement doit être approuvé pour être accepté (statut actuel : ${renouvellement.statusRenouvellement}).`
         : `Le renouvellement ne peut pas être refusé dans ce statut (statut actuel : ${renouvellement.statusRenouvellement}).`
     );
   }
@@ -1440,8 +1625,15 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
   await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
 
   const agentNomEval = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
+  // La convention du renouvellement est jointe par l'agent/admin (document_stage du nouveau
+  // stage), pas par le candidat : seule la lettre peut être signalée non conforme.
+  const decision = { ...data };
+  delete decision.conventionNonConforme;
+  delete decision.dateDebutEffective;
+  delete decision.dateFinEffective;
   await renouvellement.update({
-    ...data,
+    ...decision,
+    conventionNonConforme: 0,
     lastModifiedBy: agentNomEval,
     lastModifiedDate: new Date(),
   });
@@ -1476,8 +1668,9 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
 
     await renouvellement.stageNouveau.update(updateData);
 
-    // Si une convention existe déjà dans document_stage pour ce nouveau stage,
-    // passer directement EN_COURS sans attendre un nouvel upload.
+    // Si une convention existe déjà dans document_stage pour ce nouveau stage, il passe
+    // EN_COURS seulement si sa date de début est atteinte — sinon il reste ACCEPTE
+    // (le stage actuel est encore en cours) et le cron l'activera le jour J.
     const conventionExistante = await DocumentStage.findOne({
       where: {
         stage_idstage: renouvellement.stageNouveau.idstage,
@@ -1485,7 +1678,7 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
         del: 0,
       },
     });
-    if (conventionExistante) {
+    if (conventionExistante && statutApresConvention(dateDebutEffectiveNouveau) === 'EN_COURS') {
       await renouvellement.stageNouveau.update({ statusStage: 'EN_COURS' });
     }
 
@@ -1547,11 +1740,6 @@ const resoumettreRenouvellement = async (id, candidatId, files = {}) => {
     throw new Error('La lettre de motivation doit être remplacée car elle a été jugée non conforme');
   }
 
-  // Si la convention a été signalée non conforme, un nouveau fichier est obligatoire
-  if (renouvellement.conventionNonConforme && !files.convention) {
-    throw new Error('La convention de stage doit être remplacée car elle a été jugée non conforme');
-  }
-
   const updateData = {
     statusRenouvellement: 'EN_ATTENTE',
     motifRefus: null,
@@ -1561,15 +1749,10 @@ const resoumettreRenouvellement = async (id, candidatId, files = {}) => {
   };
 
   if (files.lettre) {
-    updateData.lettreMotivationRenouvellement = files.lettre.buffer;
+    updateData.lettreMotivationRenouvellement_path = fileStorage.saveFile(files.lettre.buffer, files.lettre.originalname, 'renouvellements');
+    updateData.lettreMotivationRenouvellement = null;
     updateData.lettreMotivationRenouvellement_filename = files.lettre.originalname;
     updateData.lettreMotivationRenouvellement_size = files.lettre.size;
-  }
-
-  if (files.convention) {
-    updateData.conventionStageEnCours = files.convention.buffer;
-    updateData.conventionStageEnCours_filename = files.convention.originalname;
-    updateData.conventionStageEnCours_size = files.convention.size;
   }
 
   await renouvellement.update({
@@ -1868,8 +2051,10 @@ const createDocumentStage = async (agentId, data, file) => {
     dateExpiration: data.dateExpiration || null,
   });
 
-  // Quand une convention est jointe à un stage accepté → passer EN_COURS
-  if (data.typeDocument === 'CONVENTION' && stage.statusStage === 'ACCEPTE') {
+  // Quand une convention est jointe à un stage accepté → EN_COURS si la date de début
+  // est atteinte, sinon il reste ACCEPTE jusqu'au jour J (activé par le cron)
+  if (data.typeDocument === 'CONVENTION' && stage.statusStage === 'ACCEPTE'
+      && statutApresConvention(stage.dateDebutEffective) === 'EN_COURS') {
     await stage.update({ statusStage: 'EN_COURS' });
   }
 
@@ -1895,9 +2080,37 @@ const createDocumentStage = async (agentId, data, file) => {
 };
 
 /**
- * Obtenir un document de stage par ID
+ * IDOR : contrôle d'accès en lecture à un document_stage (convention / attestation).
+ * - access.candidatId → le stage doit appartenir à ce candidat
+ * - access.agentContext → cloisonnement par direction (bypass si isSystemRole / lecture globale)
+ * La permission module STAGE est vérifiée en amont par le contrôleur.
+ * Tout refus est masqué en "Document non trouvé" pour ne pas révéler l'existence de l'ID.
+ * @param {{ candidatId?: number|null, agentContext?: { agentId?: number, isSystemRole?: boolean } }} access
+ * @param {{ candidats_idcandidats: number, direction_iddirection: number }|null} stage
  */
-const getDocumentStageById = async (id) => {
+const assertCanReadDocumentStage = async (access, stage) => {
+  if (!access || !stage) throw new Error('Document non trouvé');
+
+  if ('candidatId' in access) {
+    if (!access.candidatId || stage.candidats_idcandidats !== access.candidatId) {
+      throw new Error('Document non trouvé');
+    }
+    return;
+  }
+
+  if (!access.agentContext) throw new Error('Document non trouvé');
+  try {
+    await assertAgentOwnsDirection(access.agentContext, stage.direction_iddirection);
+  } catch (_) {
+    throw new Error('Document non trouvé');
+  }
+};
+
+/**
+ * Obtenir un document de stage par ID
+ * @param {object} access - voir assertCanReadDocumentStage
+ */
+const getDocumentStageById = async (id, access) => {
   const document = await DocumentStage.findOne({
     where: { iddocument: id, del: 0 },
     include: [
@@ -1921,22 +2134,28 @@ const getDocumentStageById = async (id) => {
   if (!document) {
     throw new Error('Document non trouvé');
   }
-  
+
+  await assertCanReadDocumentStage(access, document.stage);
+
   return document;
 };
 
 /**
  * Télécharger un document de stage
+ * @param {object} access - voir assertCanReadDocumentStage
  */
-const downloadDocumentStage = async (id) => {
+const downloadDocumentStage = async (id, access) => {
   const document = await DocumentStage.findOne({
     where: { iddocument: id, del: 0 },
+    include: [{ model: Stage, as: 'stage', attributes: ['candidats_idcandidats', 'direction_iddirection'] }],
   });
-  
+
   if (!document) {
     throw new Error('Document non trouvé');
   }
-  
+
+  await assertCanReadDocumentStage(access, document.stage);
+
   return {
     buffer: fileStorage.readFile(document.document_path, document.document),
     filename: document.document_filename,
@@ -1950,14 +2169,14 @@ const downloadDocumentStage = async (id) => {
 const downloadLettreRenouvellement = async (renouvellementId) => {
   const renouvellement = await RenouvellementStage.findOne({
     where: { idrenouvellement: renouvellementId, del: 0 },
-    attributes: ['idrenouvellement', 'lettreMotivationRenouvellement', 'lettreMotivationRenouvellement_filename', 'lettreMotivationRenouvellement_size'],
+    attributes: ['idrenouvellement', 'lettreMotivationRenouvellement', 'lettreMotivationRenouvellement_path', 'lettreMotivationRenouvellement_filename', 'lettreMotivationRenouvellement_size'],
   });
 
   if (!renouvellement) {
     throw new Error('Demande de renouvellement non trouvée');
   }
 
-  if (!renouvellement.lettreMotivationRenouvellement) {
+  if (!renouvellement.lettreMotivationRenouvellement_path && !renouvellement.lettreMotivationRenouvellement) {
     throw new Error('Aucune lettre de renouvellement disponible pour cette demande');
   }
 
@@ -2241,6 +2460,9 @@ const updateStage = async (stageId, data, agentContext = null) => {
   const stage = await Stage.findOne({ where: { idstage: stageId, del: 0 } });
   if (!stage) throw new Error('Stage non trouvé');
 
+  // Un agent (permission MODIFIER) ne modifie que les stages de sa direction
+  await assertAgentOwnsDirection(agentContext, stage.direction_iddirection);
+
   const updates = {};
   if (data.commentaireAdmin !== undefined)    updates.commentaireAdmin    = data.commentaireAdmin || null;
   if (data.dureeStage !== undefined)          updates.dureeStage          = data.dureeStage;
@@ -2268,7 +2490,7 @@ const updateStage = async (stageId, data, agentContext = null) => {
   // déplacer un stage vers une autre direction par ce biais (voir transfererStage
   // pour le flux normal, avec vérification de propriété de la direction d'origine).
   if (data.direction_iddirection !== undefined || data.service_idservice !== undefined) {
-    if (!agentContext || !agentContext.isSystemRole) {
+    if (!agentContext || !agentContext.isSystemRole || agentContext.accesGlobalModifier) {
       throw new Error('Action non autorisée');
     }
     if (data.direction_iddirection !== undefined) {
@@ -2708,6 +2930,64 @@ const autoriserRenouvellementStage = async (stageId, agentId) => {
 };
 
 /**
+ * Autoriser le candidat à soumettre son rapport avant la fin du dernier stage de la chaîne
+ * (même principe que l'autorisation de renouvellement : fenêtre de 7 jours).
+ * L'autorisation est portée par le stage racine de la chaîne (un seul rapport par chaîne).
+ */
+const autoriserRapportStage = async (stageId, agentId, agentContext = null) => {
+  const inapp = require('./inapp.service');
+
+  let racine = await Stage.findOne({
+    where: { idstage: stageId, del: 0 },
+    include: [{ model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom'] }],
+  });
+  if (!racine) throw new Error('Stage non trouvé');
+  while (racine.stage_parent_idstage) {
+    const parent = await Stage.findOne({
+      where: { idstage: racine.stage_parent_idstage, del: 0 },
+      include: [{ model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom'] }],
+    });
+    if (!parent) break;
+    racine = parent;
+  }
+
+  await assertAgentOwnsDirection(agentContext, racine.direction_iddirection);
+
+  const rapport = await RapportStage.findOne({ where: { stage_idstage: racine.idstage, del: 0 } });
+  if (rapport) throw new Error('Le rapport de ce stage a déjà été soumis');
+  if (!['ACCEPTE', 'EN_COURS', 'SUSPENDU', 'EXPIRE', 'TERMINE'].includes(racine.statusStage)) {
+    throw new Error('L\'autorisation de rapport n\'est possible que pour un stage validé');
+  }
+
+  await AutorisationRapportStage.update({ del: 1 }, { where: { stage_idstage: racine.idstage, del: 0 } });
+
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7);
+  const autorisation = await AutorisationRapportStage.create({
+    stage_idstage: racine.idstage,
+    autorisePar: agentId || null,
+    expiresAt,
+    usedAt: null,
+    del: 0,
+  });
+
+  const candidatId = racine.candidat?.idcandidats;
+  if (candidatId) {
+    const expireStr = expiresAt.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+    await inapp.push({
+      recipientType: 'CANDIDAT',
+      recipientId: candidatId,
+      type: 'STAGE',
+      titre: 'Rapport de stage autorisé',
+      message: `L'administration vous autorise à soumettre votre rapport de stage dès maintenant. Cette autorisation expire le ${expireStr}.`,
+      link: '/candidat/stages',
+    });
+  }
+
+  return { ...autorisation.toJSON(), candidat: racine.candidat };
+};
+
+/**
  * Récupère l'autorisation active (non expirée, non utilisée, non supprimée) pour un stage.
  * Retourne null si aucune n'existe.
  */
@@ -2725,6 +3005,7 @@ const getAutorisationActive = async (stageId) => {
 module.exports = {
   // Utilitaires (exporté pour réutilisation)
   calculerDateFin,
+  enrichirAvecChaine,
   calculerPeutAgir,
   calculerDureeEtRepos,
   getDureeContinueCandidat,
@@ -2753,12 +3034,13 @@ module.exports = {
   hasConvention,
 
   // Renouvellements
-  createRenouvellement,
   getAllRenouvellements,
   approuverRenouvellement,
   evaluateRenouvellement,
   resoumettreRenouvellement,
   rouvrirRenouvellement,
+  mettreEnTraitementRenouvellement,
+  downloadConventionDemandeRenouvellement,
   expirerRenouvellement,
   annulerApprobationRenouvellement,
   supprimerRenouvellement,
@@ -2789,5 +3071,6 @@ module.exports = {
 
   // Autorisation de renouvellement
   autoriserRenouvellementStage,
+  autoriserRapportStage,
   getAutorisationActive,
 };

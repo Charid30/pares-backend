@@ -127,7 +127,7 @@ router.get('/stages/:id/convention-renouvellement', candidatController.getConven
 
 /**
  * POST /api/candidat/stages/:id/renouvellement
- * Demander le renouvellement d'un stage (disponible 2 semaines avant la fin)
+ * Demander le renouvellement d'un stage (disponible une semaine avant la fin)
  * Body: FormData avec dureeDemandee + fichier lettreRenouvellement (PDF, max 5 Mo)
  */
 router.post(
@@ -138,14 +138,13 @@ router.post(
 
 /**
  * PUT /api/candidat/renouvellements/:id/ressoumettre
- * Re-soumettre un renouvellement rejeté, avec remplacement optionnel des fichiers non conformes
- * Files (optionnels): lettreRenouvellement, conventionRenouvellement
+ * Re-soumettre un renouvellement rejeté, avec remplacement de la lettre si non conforme
+ * File (optionnel): lettreRenouvellement — la convention est jointe par l'agent/admin
  */
 router.put(
   '/renouvellements/:id/ressoumettre',
   uploadRapport.fields([
     { name: 'lettreRenouvellement', maxCount: 1 },
-    { name: 'conventionRenouvellement', maxCount: 1 },
   ]),
   candidatController.resoumettreRenouvellement
 );

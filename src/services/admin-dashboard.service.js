@@ -10,6 +10,7 @@ const getMenuBadges = async () => {
   const stagesEnAttente = await Stage.count({
     where: {
       del: 0,
+      stage_parent_idstage: null, // les renouvellements en attente ont leur propre badge
       statusStage: 'EN_ATTENTE'
     }
   });
@@ -55,7 +56,7 @@ const getMenuBadges = async () => {
 
   // Renouvellements en attente de traitement
   const renouvellementEnAttente = await RenouvellementStage.count({
-    where: { del: 0, statusRenouvellement: { [Op.in]: ['EN_ATTENTE', 'PROGRAMMATION_EN_COURS'] } }
+    where: { del: 0, statusRenouvellement: { [Op.in]: ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'] } }
   });
 
   return {
@@ -100,13 +101,13 @@ const getDashboardStats = async () => {
   });
 
   // === STAGES ===
-  const totalStages    = await Stage.count({ where: { del: 0 } });
-  const stagesEnAttente = await Stage.count({ where: { del: 0, statusStage: 'EN_ATTENTE' } });
+  const totalStages    = await Stage.count({ where: { del: 0, stage_parent_idstage: null } });
+  const stagesEnAttente = await Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'EN_ATTENTE' } });
   const stagesEnCours   = await Stage.count({ where: { del: 0, statusStage: 'EN_COURS' } });
-  const stagesTermines  = await Stage.count({ where: { del: 0, statusStage: 'TERMINE' } });
-  const stagesAcceptes  = await Stage.count({ where: { del: 0, statusStage: 'ACCEPTE' } });
-  const stagesRejetes   = await Stage.count({ where: { del: 0, statusStage: 'REJETE' } });
-  const stagesTraitement = await Stage.count({ where: { del: 0, statusStage: { [Op.in]: ['EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'] } } });
+  const stagesTermines  = await Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'TERMINE' } });
+  const stagesAcceptes  = await Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'ACCEPTE' } });
+  const stagesRejetes   = await Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'REJETE' } });
+  const stagesTraitement = await Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: { [Op.in]: ['EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'] } } });
 
   // === AUDIENCES ===
   const totalAudiences    = await DemandeAudience.count();
