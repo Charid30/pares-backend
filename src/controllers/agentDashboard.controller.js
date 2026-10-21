@@ -1,240 +1,248 @@
 // src/controllers/agentDashboard.controller.js
-// Stats du dashboard pour les agents à rôle personnalisé.
-// Retourne uniquement les stats des modules autorisés + la liste des éléments à traiter.
+// Tableau de bord « poste de travail » des agents.
+// Retourne la file de travail (ce que l'agent peut faire maintenant, selon ses permissions)
+// et quelques chiffres clés, limités aux directions de l'agent — sauf rôle système
+// (ADMIN, AGENT_RH…), qui voit toutes les directions.
 const { Op } = require('sequelize');
 const { success, error } = require('../utils/response.util');
+const { getAgentDirections } = require('../utils/agentDirections.util');
 const {
   Stage,
+  RenouvellementStage,
+  RapportStage,
+  DemandeModificationStage,
   Offre,
   Aide,
   DemandeAudience,
-  DemandeModificationStage,
-  Candidat,
+  Agent,
+  AgentDirection,
+  Service,
+  Direction,
   Permission,
 } = require('../models');
 
-const SYSTEM_AGENT_ROLES = ['ADMIN'];
+// Mêmes rôles « portée globale » que stage.controller.js (ACTION_SYSTEM_ROLES)
+const GLOBAL_ROLES = ['ADMIN', 'AGENT_RH', 'AGENT_FINANCIER', 'AGENT_COMMERCIAL'];
+const ADMIN_MODULES = [
+  'STAGE', 'SUIVI_STAGE', 'SUSPENSION_STAGE', 'CANDIDATURES',
+  'CANDIDATS', 'OFFRE', 'AIDE', 'DEMANDE_AUDIENCE',
+];
+const JOUR_MS = 24 * 60 * 60 * 1000;
 
-// ── Historique 7 derniers jours ───────────────────────────────────────────────
+const getUserRoles = (user) =>
+  (Array.isArray(user.roles) && user.roles.length) ? user.roles : (user.role ? [user.role] : []);
+const getUserRoleIds = (user) =>
+  (Array.isArray(user.roleIds) && user.roleIds.length) ? user.roleIds : (user.roleId ? [user.roleId] : []);
+
+/** Permissions de l'utilisateur (union de ses rôles) : Set de « MODULE:ACTION ». ADMIN → tout. */
+const chargerPermissions = async (user) => {
+  if (getUserRoles(user).includes('ADMIN')) return { isAdmin: true, perms: new Set(), modules: ADMIN_MODULES };
+  const roleIds = getUserRoleIds(user);
+  if (!roleIds.length) return { isAdmin: false, perms: new Set(), modules: [] };
+  const rows = await Permission.findAll({
+    where: { role_idrole: { [Op.in]: roleIds }, del: 0 },
+    attributes: ['module', 'action'],
+  });
+  return {
+    isAdmin: false,
+    perms: new Set(rows.map(p => `${p.module}:${p.action}`)),
+    modules: [...new Set(rows.map(p => p.module))],
+  };
+};
+
 /**
- * Compte les enregistrements créés par jour sur les 7 derniers jours.
- * @param {Model} Model  - Modèle Sequelize (Stage, Offre, etc.)
- * @param {boolean} hasDel - true si la table a une colonne "del"
- * @returns {Promise<number[]>} - tableau de 7 entiers [J-6 … J]
+ * Directions de l'agent, résolues comme dans chaque écran :
+ * - stages (stage.service) : service → directions, sinon direction directe ;
+ * - aides / offres / audiences : table agents_directions, sinon colonne historique.
  */
-const getModuleEvolution = async (Model, hasDel = true) => {
-  try {
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 6);
-    startDate.setHours(0, 0, 0, 0);
-    const startStr = startDate.toISOString().split('T')[0];
+const chargerDirections = async (agentId) => {
+  if (!agentId) return { stage: [], autres: [], liste: [] };
+  const agent = await Agent.findByPk(agentId, {
+    include: [
+      { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
+      { model: Direction, as: 'directionDirecte' },
+    ],
+  });
+  const liste = getAgentDirections(agent);
+  const rows = await AgentDirection.findAll({ where: { agent_idagents: agentId }, attributes: ['direction_iddirection'] });
+  const autres = rows.length
+    ? rows.map(r => r.direction_iddirection)
+    : (agent?.direction_iddirection ? [agent.direction_iddirection] : []);
+  return { stage: liste.map(d => d.iddirection), autres, liste };
+};
 
-    const tableName = Model.getTableName();
-    const delClause = hasDel ? 'AND (del = 0 OR del IS NULL)' : '';
+/** Filtre direction : null = pas de restriction ; liste vide → aucun résultat. */
+const filtreDirection = (ids) => (ids === null
+  ? {}
+  : { direction_iddirection: ids.length ? { [Op.in]: ids } : { [Op.eq]: -1 } });
 
-    const rows = await Model.sequelize.query(
-      `SELECT DATE(createdDate) AS day, COUNT(*) AS cnt
-         FROM \`${tableName}\`
-        WHERE createdDate >= :startDate
-          ${delClause}
-        GROUP BY DATE(createdDate)
-        ORDER BY day ASC`,
-      {
-        replacements: { startDate: startStr },
-        type: Model.sequelize.QueryTypes.SELECT,
-      },
-    );
+/** Priorité selon l'ancienneté du plus vieux dossier en attente. */
+const prioriteDepuis = (plusAncien) => {
+  if (!plusAncien) return 'medium';
+  const jours = Math.floor((Date.now() - new Date(plusAncien).getTime()) / JOUR_MS);
+  return jours > 7 ? 'high' : jours > 3 ? 'medium' : 'low';
+};
 
-    // Convertir les lignes en map date → count
-    const dateMap = {};
-    rows.forEach(r => {
-      const key = r.day instanceof Date
-        ? r.day.toISOString().split('T')[0]
-        : String(r.day);
-      dateMap[key] = parseInt(r.cnt, 10) || 0;
-    });
+/**
+ * Compte un type de tâche : { count, plusAncien }.
+ * `include` permet de filtrer par la direction du stage lié (renouvellement, rapport, suspension).
+ */
+const compter = async (Model, where, include, colonneDate) => {
+  const options = include ? { where, include, distinct: true } : { where };
+  const count = await Model.count(options);
+  if (!count) return { count: 0, plusAncien: null };
+  const premier = await Model.findOne({
+    where,
+    include,
+    attributes: [colonneDate],
+    order: [[colonneDate, 'ASC']],
+  });
+  return { count, plusAncien: premier ? premier[colonneDate] : null };
+};
 
-    // Construire un tableau de 7 jours consécutifs
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - (6 - i));
-      return dateMap[d.toISOString().split('T')[0]] || 0;
-    });
-  } catch {
-    // En cas d'erreur (table sans created_at, colonne manquante…), retourner des 0
-    return Array(7).fill(0);
+const includeStage = (dirStage) => [{
+  model: Stage, as: 'stage', attributes: [], required: true,
+  where: { del: 0, ...filtreDirection(dirStage) },
+}];
+
+/** Construit les données du tableau de bord pour un utilisateur authentifié. */
+const construireDashboard = async (user) => {
+  const { isAdmin, perms, modules } = await chargerPermissions(user);
+  const peut = (module, action) => isAdmin || perms.has(`${module}:${action}`);
+  const aModule = (module) => modules.includes(module);
+
+  const porteeGlobale = getUserRoles(user).some(r => GLOBAL_ROLES.includes(r));
+  const dirs = await chargerDirections(user.agentId);
+  const dirStage = porteeGlobale ? null : dirs.stage;
+  const dirAutres = porteeGlobale ? null : dirs.autres;
+
+  const notDeleted = { [Op.or]: [{ del: 0 }, { del: null }] };
+  const taches = [];
+  const ajouter = async (def, Model, where, include, colonneDate = 'createdDate') => {
+    const { count, plusAncien } = await compter(Model, where, include, colonneDate);
+    if (count > 0) taches.push({ ...def, count, plusAncien, priority: prioriteDepuis(plusAncien) });
+  };
+
+  const moduleStage = aModule('STAGE');
+  const stageWhere = { ...notDeleted, ...filtreDirection(dirStage) };
+  const renouvInclude = (dir) => [{
+    model: Stage, as: 'stageNouveau', attributes: [], required: true,
+    where: { del: 0, ...filtreDirection(dir) },
+  }];
+
+  // ── Stages et renouvellements (module STAGE) ─────────────────────────────
+  if (moduleStage && peut('STAGE', 'APPROUVER')) {
+    await ajouter({
+      cle: 'STAGES_A_APPROUVER', module: 'STAGE', action: 'APPROUVER',
+      label: 'Demandes de stage à approuver', route: '/dashboard/agent/stages',
+    }, Stage, { ...stageWhere, stage_parent_idstage: null, statusStage: 'EN_ATTENTE' });
   }
+  if (moduleStage && peut('STAGE', 'VALIDER')) {
+    await ajouter({
+      cle: 'STAGES_A_ACCEPTER', module: 'STAGE', action: 'VALIDER',
+      label: 'Stages à accepter (convention à joindre)', route: '/dashboard/agent/stages',
+    }, Stage, { ...stageWhere, stage_parent_idstage: null, statusStage: 'PROGRAMMATION_EN_COURS' });
+  }
+  if (moduleStage && peut('STAGE', 'APPROUVER')) {
+    await ajouter({
+      cle: 'RENOUVELLEMENTS_A_APPROUVER', module: 'RENOUVELLEMENT', action: 'APPROUVER',
+      label: 'Renouvellements à approuver', route: '/dashboard/agent/renouvellements',
+    }, RenouvellementStage,
+    { del: 0, statusRenouvellement: { [Op.in]: ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT'] } },
+    renouvInclude(dirStage), 'dateRenouvellement');
+  }
+  if (moduleStage && peut('STAGE', 'VALIDER')) {
+    await ajouter({
+      cle: 'RENOUVELLEMENTS_A_ACCEPTER', module: 'RENOUVELLEMENT', action: 'VALIDER',
+      label: 'Renouvellements à accepter (convention à joindre)', route: '/dashboard/agent/renouvellements',
+    }, RenouvellementStage,
+    { del: 0, statusRenouvellement: 'PROGRAMMATION_EN_COURS' },
+    renouvInclude(dirStage), 'dateRenouvellement');
+
+    await ajouter({
+      cle: 'RAPPORTS_A_EVALUER', module: 'RAPPORT', action: 'VALIDER',
+      label: 'Rapports de stage à évaluer', route: '/dashboard/agent/rapports',
+    }, RapportStage,
+    { ...notDeleted, statusRapport: { [Op.in]: ['SOUMIS', 'EN_EVALUATION'] } },
+    includeStage(dirStage));
+  }
+
+  // ── Suspensions / annulations ────────────────────────────────────────────
+  if (aModule('SUSPENSION_STAGE') && (peut('SUSPENSION_STAGE', 'VALIDER') || peut('SUSPENSION_STAGE', 'REJETER'))) {
+    await ajouter({
+      cle: 'SUSPENSIONS_A_TRAITER', module: 'SUSPENSION_STAGE', action: 'VALIDER',
+      label: 'Suspensions / annulations à traiter', route: '/dashboard/agent/suspensions',
+    }, DemandeModificationStage, { ...notDeleted, status: 'EN_ATTENTE' }, includeStage(dirStage));
+  }
+
+  // ── Offres, aides, audiences (accès au module suffit, comme leurs écrans) ─
+  if (aModule('OFFRE')) {
+    await ajouter({
+      cle: 'OFFRES_A_TRAITER', module: 'OFFRE', action: null,
+      label: 'Offres commerciales à traiter', route: '/dashboard/agent/offres',
+    }, Offre, { ...notDeleted, ...filtreDirection(dirAutres), statusOffre: { [Op.in]: ['EN_ATTENTE', 'EN_TRAITEMENT'] } });
+  }
+  if (aModule('AIDE')) {
+    await ajouter({
+      cle: 'AIDES_A_TRAITER', module: 'AIDE', action: null,
+      label: 'Aides sociales à traiter', route: '/dashboard/agent/aides',
+    }, Aide, { ...notDeleted, ...filtreDirection(dirAutres), statusAide: { [Op.in]: ['EN_ATTENTE', 'EN_TRAITEMENT'] } });
+  }
+  if (aModule('DEMANDE_AUDIENCE')) {
+    await ajouter({
+      cle: 'AUDIENCES_A_TRAITER', module: 'DEMANDE_AUDIENCE', action: null,
+      label: "Demandes d'audience à traiter", route: '/dashboard/agent/audiences',
+    }, DemandeAudience, { ...notDeleted, ...filtreDirection(dirAutres), status: 'EN_ATTENTE' });
+  }
+
+  const ordre = { high: 0, medium: 1, low: 2 };
+  taches.sort((a, b) => ordre[a.priority] - ordre[b.priority] || b.count - a.count);
+
+  // ── Échéances et chiffres clés (stages de ses directions) ────────────────
+  let echeances = [];
+  const kpis = {};
+  if (moduleStage || aModule('SUIVI_STAGE')) {
+    const aujourdHui = new Date();
+    aujourdHui.setHours(0, 0, 0, 0);
+    const dans7j = new Date(aujourdHui.getTime() + 7 * JOUR_MS);
+    const debutMois = new Date(aujourdHui.getFullYear(), aujourdHui.getMonth(), 1);
+    const racine = { ...stageWhere, stage_parent_idstage: null };
+
+    const [enStage, finSous7j, demandesTotal, demandesMois] = await Promise.all([
+      Stage.count({ where: { ...stageWhere, statusStage: 'EN_COURS' } }),
+      Stage.count({ where: { ...stageWhere, statusStage: 'EN_COURS', dateFinEffective: { [Op.between]: [aujourdHui, dans7j] } } }),
+      Stage.count({ where: racine }),
+      Stage.count({ where: { ...racine, createdDate: { [Op.gte]: debutMois } } }),
+    ]);
+    Object.assign(kpis, { enStage, demandesTotal, demandesMois });
+    if (finSous7j > 0) {
+      echeances = [{
+        cle: 'STAGES_FIN_7J', module: 'SUIVI_STAGE', count: finSous7j,
+        label: 'Stages qui se terminent sous 7 jours',
+        route: aModule('SUIVI_STAGE') ? '/dashboard/agent/suivi-stages' : '/dashboard/agent/stages',
+      }];
+    }
+  }
+  kpis.aTraiter = taches.reduce((s, t) => s + t.count, 0);
+
+  return {
+    accessibleModules: modules,
+    porteeGlobale,
+    directions: dirs.liste.map(d => ({ iddirection: d.iddirection, nom: d.nom, accronyme: d.accronyme })),
+    taches,
+    echeances,
+    kpis,
+  };
 };
 
 const getStats = async (req, res) => {
   try {
-    // Filtre "non supprimé" : gère del=0 et del=NULL (anciens comptes)
-    const notDeleted = { [Op.or]: [{ del: 0 }, { del: null }] };
-
-    // ── Déterminer les modules accessibles ────────────────────────────────────
-    let accessibleModules = [];
-
-    if (SYSTEM_AGENT_ROLES.includes(req.user.role)) {
-      accessibleModules = [
-        'STAGE', 'SUIVI_STAGE', 'CANDIDATURES',
-        'CANDIDATS', 'OFFRE', 'AIDE', 'DEMANDE_AUDIENCE',
-      ];
-    } else if (req.user.roleId) {
-      const perms = await Permission.findAll({
-        where: { role_idrole: req.user.roleId, del: 0 },
-        attributes: ['module'],
-      });
-      accessibleModules = [...new Set(perms.map(p => p.module))];
-    }
-
-    const stats = {};
-    const pendingItems = [];
-
-    // ── Stages ───────────────────────────────────────────────────────────────
-    if (accessibleModules.includes('STAGE') || accessibleModules.includes('SUIVI_STAGE')) {
-      const [total, enAttente, enCours, termines] = await Promise.all([
-        Stage.count({ where: notDeleted }),
-        Stage.count({ where: { ...notDeleted, statusStage: 'EN_ATTENTE' } }),
-        Stage.count({ where: { ...notDeleted, statusStage: { [Op.in]: ['EN_COURS', 'EN_TRAITEMENT'] } } }),
-        Stage.count({ where: { ...notDeleted, statusStage: { [Op.in]: ['TERMINE', 'VALIDE'] } } }),
-      ]);
-      stats.stages = { total, enAttente, enCours, termines };
-      if (enAttente > 0) {
-        pendingItems.push({
-          module: 'STAGE',
-          label: 'Stages en attente',
-          count: enAttente,
-          route: '/dashboard/agent/stages',
-          priority: enAttente > 5 ? 'high' : 'medium',
-        });
-      }
-    }
-
-    // ── Candidatures (offres commerciales) ───────────────────────────────────
-    if (accessibleModules.includes('CANDIDATURES')) {
-      const [total, enAttente] = await Promise.all([
-        Stage.count({ where: notDeleted }),
-        Stage.count({ where: { ...notDeleted, statusStage: { [Op.in]: ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT'] } } }),
-      ]);
-      stats.candidatures = { total, enAttente };
-      if (enAttente > 0) {
-        pendingItems.push({
-          module: 'CANDIDATURES',
-          label: 'Candidatures à examiner',
-          count: enAttente,
-          route: '/dashboard/agent/candidatures',
-          priority: enAttente > 5 ? 'high' : 'medium',
-        });
-      }
-    }
-
-    // ── Candidats ─────────────────────────────────────────────────────────────
-    if (accessibleModules.includes('CANDIDATS')) {
-      const total = await Candidat.count({ where: notDeleted });
-      stats.candidats = { total };
-    }
-
-    // ── Offres commerciales ───────────────────────────────────────────────────
-    if (accessibleModules.includes('OFFRE')) {
-      const [total, enAttente, validees] = await Promise.all([
-        Offre.count({ where: notDeleted }),
-        Offre.count({ where: { ...notDeleted, statusOffre: { [Op.in]: ['EN_ATTENTE', 'EN_TRAITEMENT'] } } }),
-        Offre.count({ where: { ...notDeleted, statusOffre: 'VALIDEE' } }),
-      ]);
-      stats.offres = { total, enAttente, validees };
-      if (enAttente > 0) {
-        pendingItems.push({
-          module: 'OFFRE',
-          label: 'Offres en attente',
-          count: enAttente,
-          route: '/dashboard/agent/offres',
-          priority: 'medium',
-        });
-      }
-    }
-
-    // ── Aides sociales ────────────────────────────────────────────────────────
-    if (accessibleModules.includes('AIDE')) {
-      const [total, enAttente, validees] = await Promise.all([
-        Aide.count({ where: notDeleted }),
-        Aide.count({ where: { ...notDeleted, statusAide: { [Op.in]: ['EN_ATTENTE', 'EN_TRAITEMENT'] } } }),
-        Aide.count({ where: { ...notDeleted, statusAide: 'VALIDEE' } }),
-      ]);
-      stats.aides = { total, enAttente, validees };
-      if (enAttente > 0) {
-        pendingItems.push({
-          module: 'AIDE',
-          label: 'Aides en attente',
-          count: enAttente,
-          route: '/dashboard/agent/aides',
-          priority: 'medium',
-        });
-      }
-    }
-
-    // ── Demandes d'audience ───────────────────────────────────────────────────
-    if (accessibleModules.includes('DEMANDE_AUDIENCE')) {
-      const [total, enAttente, acceptees] = await Promise.all([
-        DemandeAudience.count({ where: notDeleted }),
-        DemandeAudience.count({ where: { ...notDeleted, status: 'EN_ATTENTE' } }),
-        DemandeAudience.count({ where: { ...notDeleted, status: 'ACCEPTE' } }),
-      ]);
-      stats.audiences = { total, enAttente, acceptees };
-      if (enAttente > 0) {
-        pendingItems.push({
-          module: 'DEMANDE_AUDIENCE',
-          label: "Audiences en attente",
-          count: enAttente,
-          route: '/dashboard/agent/audiences',
-          priority: 'low',
-        });
-      }
-    }
-
-    // ── Suspensions / Annulations ────────────────────────────────────────────
-    if (accessibleModules.includes('SUSPENSION_STAGE')) {
-      const [total, enAttente] = await Promise.all([
-        DemandeModificationStage.count({ where: notDeleted }),
-        DemandeModificationStage.count({ where: { ...notDeleted, status: 'EN_ATTENTE' } }),
-      ]);
-      stats.suspensions = { total, enAttente };
-      if (enAttente > 0) {
-        pendingItems.push({
-          module: 'SUSPENSION_STAGE',
-          label: 'Suspensions / Annulations en attente',
-          count: enAttente,
-          route: '/dashboard/agent/suspensions',
-          priority: 'medium',
-        });
-      }
-    }
-
-    // ── Historique 7 jours par module (en parallèle, silencieux en cas d'erreur) ──
-    const evolution = {};
-    const evoTasks = [];
-
-    if (accessibleModules.includes('STAGE') || accessibleModules.includes('SUIVI_STAGE')) {
-      evoTasks.push(getModuleEvolution(Stage).then(d => { evolution.STAGE = d; }));
-    }
-    if (accessibleModules.includes('OFFRE')) {
-      evoTasks.push(getModuleEvolution(Offre).then(d => { evolution.OFFRE = d; }));
-    }
-    if (accessibleModules.includes('AIDE')) {
-      evoTasks.push(getModuleEvolution(Aide).then(d => { evolution.AIDE = d; }));
-    }
-    if (accessibleModules.includes('DEMANDE_AUDIENCE')) {
-      evoTasks.push(getModuleEvolution(DemandeAudience).then(d => { evolution.DEMANDE_AUDIENCE = d; }));
-    }
-    if (accessibleModules.includes('CANDIDATS')) {
-      evoTasks.push(getModuleEvolution(Candidat, false).then(d => { evolution.CANDIDATS = d; }));
-    }
-    await Promise.all(evoTasks);
-
-    return success(res, { stats, accessibleModules, pendingItems, evolution }, 'Stats chargées');
+    const data = await construireDashboard(req.user);
+    return success(res, data, 'Stats chargées');
   } catch (err) {
     console.error('Erreur agentDashboard:', err.message);
     return error(res, err.message || 'Erreur serveur', 500);
   }
 };
 
-module.exports = { getStats };
+module.exports = { getStats, construireDashboard };
