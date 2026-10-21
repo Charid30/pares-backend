@@ -126,6 +126,23 @@ describe('evaluateRenouvellement', () => {
     expect(stageNouveau.dateDebutEffective).toBe('2026-04-01'); // lendemain du 31 mars
   });
 
+  test('ACCEPTER avec une date de début et une durée accordée : fin calculée sur la durée accordée', async () => {
+    const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
+    const candidat = await creerCandidat();
+    const { stageNouveau, renouvellement } = await creerRenouvellement(direction, candidat.idcandidats, '2026-03-31');
+
+    await stageService.evaluateRenouvellement(renouvellement.idrenouvellement, {
+      statusRenouvellement: 'ACCEPTE', dateDebutEffective: '2026-05-01', dureeAccordee: 3,
+    }, { isSystemRole: true, isAdmin: true });
+
+    await stageNouveau.reload();
+    await renouvellement.reload();
+    expect(stageNouveau.dateDebutEffective).toBe('2026-05-01');
+    expect(stageNouveau.dureeStage).toBe(3);
+    expect(stageNouveau.dateFinEffective).toBe(stageService.calculerDateFin('2026-05-01', 3));
+    expect(renouvellement.dureeDemandee).toBe(2); // la demande du candidat reste tracée
+  });
+
   test('REJETER met le nouveau stage en REJETE avec le motif, sans toucher aux dates', async () => {
     const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
     const candidat = await creerCandidat();

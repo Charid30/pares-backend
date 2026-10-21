@@ -1631,6 +1631,7 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
   delete decision.conventionNonConforme;
   delete decision.dateDebutEffective;
   delete decision.dateFinEffective;
+  delete decision.dureeAccordee;
   await renouvellement.update({
     ...decision,
     conventionNonConforme: 0,
@@ -1643,6 +1644,8 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
 
     let dateDebutEffectiveNouveau = data.dateDebutEffective || null;
     let dateFinEffectiveNouveau = data.dateFinEffective || null;
+    // Durée accordée (comme pour une demande de stage) — par défaut la durée demandée
+    const dureeAccordee = parseInt(data.dureeAccordee) || renouvellement.dureeDemandee;
 
     // Auto-calculer seulement si l'admin n'a pas fourni les dates manuellement
     if (!dateDebutEffectiveNouveau && stageActuelDateFin) {
@@ -1651,14 +1654,12 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
       dateDebutEffectiveNouveau = lendemain.toISOString().split('T')[0];
     }
     if (dateDebutEffectiveNouveau && !dateFinEffectiveNouveau) {
-      dateFinEffectiveNouveau = calculerDateFin(
-        dateDebutEffectiveNouveau,
-        renouvellement.dureeDemandee
-      );
+      dateFinEffectiveNouveau = calculerDateFin(dateDebutEffectiveNouveau, dureeAccordee);
     }
 
     const updateData = {
       statusStage: 'ACCEPTE',
+      dureeStage: dureeAccordee,
     };
 
     if (dateDebutEffectiveNouveau) {

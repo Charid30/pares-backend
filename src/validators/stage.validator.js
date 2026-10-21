@@ -184,6 +184,16 @@ const evaluateRenouvellementSchema = Joi.object({
     then: Joi.date().optional().allow(null),
     otherwise: Joi.forbidden(),
   }),
+  // Durée (en mois) réellement accordée — par défaut la durée demandée par le candidat
+  dureeAccordee: Joi.when('statusRenouvellement', {
+    is: 'ACCEPTE',
+    then: Joi.number().integer().min(1).max(12).optional().allow(null).messages({
+      'number.base': 'La durée accordée doit être un nombre',
+      'number.min': 'La durée accordée doit être au moins 1 mois',
+      'number.max': 'La durée accordée ne peut pas dépasser 12 mois',
+    }),
+    otherwise: Joi.forbidden(),
+  }),
   dateFinEffective: Joi.when('statusRenouvellement', {
     is: 'ACCEPTE',
     then: Joi.date().optional().allow(null).when('dateDebutEffective', {
