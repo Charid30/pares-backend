@@ -106,6 +106,9 @@ pares-frontend/src/features/dashboard/
 ### Frontend Angular
 - Respecter la syntaxe du fichier existant : composants admin récents en `@if`/`@for`,
   composants agent/anciens en `*ngIf`/`*ngFor`. Ne pas mélanger dans un fichier.
+- **Un profil = une interface** : `espaceGuard` (core/guards) sur `/admin`, `/dashboard/agent` et `/dashboard/candidat` ;
+  un utilisateur qui ouvre l'espace d'un autre profil est renvoyé vers le sien (`AuthService.getDashboardRoute()` :
+  ADMIN > CANDIDAT > agent, même règle qu'à la connexion). Les admins ayant aussi un profil agent restent dans l'admin.
 - Toasts : `this.showToast(...)` (`addToast` n'existe pas).
 - Téléchargements protégés : passer par `HttpClient` (`responseType: 'blob'`) — `window.open(url)` n'envoie pas le JWT.
 - Recherche : la barre « Rechercher… » du header admin diffuse le terme via `SearchService` (`term$`) ;
@@ -382,3 +385,10 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
   valeur par défaut, retirée du modèle le 2026-10-12). Migration `migration_prod_renouvellement_created_date_remplie.sql`
   (remplie avec `dateRenouvellement`, puis NOT NULL DEFAULT CURRENT_TIMESTAMP) ; colonne remise dans le modèle.
   Auteur : `createdBy` vide pour 16 demandes → « Candidat » (`migration_prod_renouvellement_created_by_rempli.sql`).
+- **Interface par profil** (frontend) : l'espace agent n'avait que `authGuard` → un admin qui saisissait
+  `/dashboard/agent/…` voyait l'interface agent avec les données admin. `espaceGuard` sur les 3 espaces (test
+  `espace-guard.spec.ts`) ; `roleGuard` supprimé (remplacé). Profils vérifiés en base : aucun compte mixte
+  candidat/agent ; 4 admins ont aussi un profil agent (Admin, ZAPPOLINAIRE, SJOEL, therbert).
+- **Direction 8 = DTL** (Transport et Logistique) : **aucun agent rattaché** → ses dossiers (40 demandes en traitement,
+  1 en programmation, renouvellement n°10) ne sont visibles que de l'admin et des rôles à lecture globale. À régler
+  par l'administration (rattacher un agent à la DTL), pas par le code.
