@@ -71,8 +71,15 @@ describe('construireDashboard — file de travail agent', () => {
     expect(data.directions.map(d => d.iddirection)).toEqual([d1.iddirection]);
   });
 
+  test('renouvellements : permissions du module RENOUVELLEMENT, pas de STAGE', async () => {
+    const role = await creerRole([['STAGE', 'VALIDER']]);
+    const data = await construireDashboard({ role: role.accronyme, roleIds: [role.idrole], agentId: agent.idagents });
+    expect(tache(data, 'STAGES_A_ACCEPTER').count).toBe(1);
+    expect(tache(data, 'RENOUVELLEMENTS_A_ACCEPTER')).toBeUndefined();
+  });
+
   test('VALIDER : stages et renouvellements à accepter (stages enfants exclus des demandes)', async () => {
-    const role = await creerRole([['STAGE', 'CONSULTER'], ['STAGE', 'VALIDER']]);
+    const role = await creerRole([['STAGE', 'CONSULTER'], ['STAGE', 'VALIDER'], ['RENOUVELLEMENT', 'VALIDER']]);
     const data = await construireDashboard({ role: role.accronyme, roleIds: [role.idrole], agentId: agent.idagents });
 
     expect(tache(data, 'STAGES_A_APPROUVER')).toBeUndefined();

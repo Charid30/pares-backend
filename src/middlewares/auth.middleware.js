@@ -216,4 +216,23 @@ const authorizeAnyAction = (module, actions) => async (req, res, next) => {
   }
 };
 
-module.exports = { authenticate, authorize, authorizeModule, authorizeAction, authorizeAnyAction };
+/**
+ * Action sur un stage (:id) dont le module dépend du stage : un stage de renouvellement
+ * (stage enfant, stage_parent_idstage renseigné) relève du module RENOUVELLEMENT, une demande
+ * de stage du module STAGE. Le module retenu est exposé dans req.permissionModule.
+ * @param {string} action - ex. 'CREER' (convention), 'MODIFIER' (dates)
+ */
+const authorizeActionSurStage = (action) => async (req, res, next) => {
+  if (!req.user) return error(res, 'Non authentifié', 401);
+
+  try {
+    const { Stage } = require('../models');
+    const stage = await Stage.findByPk(parseInt(req.params.id, 10), { attributes: ['idstage', 'stage_parent_idstage'] });
+    req.permissionModule = stage?.stage_parent_idstage ? 'RENOUVELLEMENT' : 'STAGE';
+  } catch (err) {
+    return error(res, 'Erreur serveur lors de la vérification des permissions', 500);
+  }
+  return authorizeAction(req.permissionModule, action)(req, res, next);
+};
+
+module.exports = { authenticate, authorize, authorizeModule, authorizeAction, authorizeAnyAction, authorizeActionSurStage };

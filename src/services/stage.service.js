@@ -1197,7 +1197,12 @@ const getAllRenouvellements = async (filters = {}, agentContext = null) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   const where = { del: 0 };
-  if (statusRenouvellement) where.statusRenouvellement = statusRenouvellement;
+  if (statusRenouvellement) {
+    // Plusieurs statuts séparés par une virgule (onglets de l'écran agent, ex. "ACCEPTE,EN_COURS")
+    where.statusRenouvellement = statusRenouvellement.includes(',')
+      ? { [Op.in]: statusRenouvellement.split(',').map(s => s.trim()).filter(Boolean) }
+      : statusRenouvellement;
+  }
   if (dateDebut || dateFin) {
     where.dateRenouvellement = {};
     if (dateDebut) where.dateRenouvellement[Op.gte] = new Date(dateDebut);

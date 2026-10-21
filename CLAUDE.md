@@ -114,6 +114,13 @@ pares-frontend/src/features/dashboard/
   l'agent doit se **reconnecter** (un F5 déclenche aussi `refreshUser()`).
 - Rôles : ADMIN, CANDIDAT, TEST, APPROBATEUR DE STAGE, AGENT RH, ADMIN_RH (lecture globale).
 - Module STAGE : CONSULTER, APPROUVER, VALIDER, REJETER, CREER (joindre une convention), MODIFIER, ATTESTER, TRANSFERER.
+- Module RENOUVELLEMENT (depuis le 2026-10-21, migration `migration_prod_permissions_renouvellement.sql` qui recopie
+  les permissions STAGE de chaque rôle) : CONSULTER, APPROUVER, VALIDER (accepter avec la convention), REJETER,
+  CREER (joindre / remplacer la convention), MODIFIER (dates). `PUT /stages/:id` et `PUT /stages/:id/convention`
+  vérifient RENOUVELLEMENT pour un stage enfant, STAGE sinon (`authorizeActionSurStage`).
+  Menu agent : « Renouvellement [DIRECTION] » (directions de l'agent, `scope=direction`) s'il a une action, ou
+  CONSULTER hors lecture globale (lecture seule) ; « Renouvellement (Vue globale) » (lecture seule, toutes directions)
+  pour un rôle lecture globale avec CONSULTER. Rouvrir / annuler l'approbation / expirer / supprimer : ADMIN seul.
 
 ---
 

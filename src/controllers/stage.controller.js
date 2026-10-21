@@ -328,7 +328,7 @@ const remplacerConventionStage = async (req, res) => {
     const agentId = req.user.agentId || null;
     // Un agent ne remplace la convention que d'un stage de sa direction (sauf accès global CREER)
     const agentContext = getAgentContext(req.user);
-    if (!agentContext.isSystemRole && await hasGlobalActionAccess(req.user, 'STAGE', ['CREER'])) {
+    if (!agentContext.isSystemRole && await hasGlobalActionAccess(req.user, req.permissionModule || 'STAGE', ['CREER'])) {
       agentContext.isSystemRole = true;
     }
     const doc = await stageService.remplacerConventionStage(req.params.id, agentId, req.file, agentContext);
@@ -376,9 +376,11 @@ const getAllRenouvellements = async (req, res) => {
   try {
     // Même portée que la liste des stages : rôle système / lecture globale → toutes les
     // directions, sinon uniquement les directions de l'agent.
-    const isSystemRole = await hasGlobalReadAccess(req.user, 'STAGE');
+    // scope=direction (écran agent, comme « Stage [DIRECTION] ») : toujours limité aux
+    // directions de l'agent, même avec un rôle lecture globale.
+    const isSystemRole = req.query.scope === 'direction' ? false : await hasGlobalReadAccess(req.user, 'RENOUVELLEMENT');
     const isActionSystemRole = getAgentContext(req.user).isSystemRole
-      || await hasGlobalActionAccess(req.user, 'STAGE', STAGE_GLOBAL_ACTIONS);
+      || await hasGlobalActionAccess(req.user, 'RENOUVELLEMENT', STAGE_GLOBAL_ACTIONS);
     const renouvellements = await stageService.getAllRenouvellements(req.query, {
       agentId: req.user.agentId,
       isSystemRole,
@@ -398,8 +400,8 @@ const getAllRenouvellements = async (req, res) => {
 const approuverRenouvellement = async (req, res) => {
   try {
     const agentContext = getAgentContext(req.user);
-    // Un rôle "lecture globale" avec APPROUVER sur STAGE peut approuver hors de sa direction
-    if (!agentContext.isSystemRole && await hasGlobalActionAccess(req.user, 'STAGE', ['APPROUVER'])) {
+    // Un rôle "lecture globale" avec APPROUVER sur RENOUVELLEMENT peut approuver hors de sa direction
+    if (!agentContext.isSystemRole && await hasGlobalActionAccess(req.user, 'RENOUVELLEMENT', ['APPROUVER'])) {
       agentContext.isSystemRole = true;
     }
     const renouvellement = await stageService.approuverRenouvellement(req.params.id, agentContext);
@@ -427,7 +429,7 @@ const evaluateRenouvellement = async (req, res) => {
     const matchingAction = Object.keys(STAGE_GLOBAL_ACTION_STATUS)
       .find(action => STAGE_GLOBAL_ACTION_STATUS[action] === req.body.statusRenouvellement);
     if (!agentContext.isSystemRole && matchingAction
-        && await hasGlobalActionAccess(req.user, 'STAGE', [matchingAction])) {
+        && await hasGlobalActionAccess(req.user, 'RENOUVELLEMENT', [matchingAction])) {
       agentContext.isSystemRole = true;
     }
     const renouvellement = await stageService.evaluateRenouvellement(req.params.id, req.body, agentContext, req.file);
@@ -925,7 +927,7 @@ const updateStage = async (req, res) => {
     const agentContext = getAgentContext(req.user);
     // Accès global (rôle « lecture globale » avec MODIFIER) : pas de cloisonnement par direction
     // pour les dates — l'affectation direction/service reste réservée aux rôles système.
-    const accesGlobalModifier = !agentContext.isSystemRole && await hasGlobalActionAccess(req.user, 'STAGE', ['MODIFIER']);
+    const accesGlobalModifier = !agentContext.isSystemRole && await hasGlobalActionAccess(req.user, req.permissionModule || 'STAGE', ['MODIFIER']);
     const stage = await stageService.updateStage(req.params.id, req.body,
       accesGlobalModifier ? { ...agentContext, isSystemRole: true, accesGlobalModifier: true } : agentContext);
     return success(res, stage, 'Stage modifié avec succès');

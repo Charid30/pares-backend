@@ -10,6 +10,7 @@ const MODULES = [
   { key: 'CANDIDATS',        label: 'Candidats' },
   { key: 'STAGE',            label: 'Stages' },
   { key: 'SUIVI_STAGE',      label: 'Suivi des Stages' },
+  { key: 'RENOUVELLEMENT',   label: 'Renouvellements' },
   { key: 'SUSPENSION_STAGE', label: 'Suspensions / Annulations' },
   { key: 'OFFRE',            label: 'Offres Commerciales' },
   { key: 'AIDE',             label: 'Aides Sociales' },

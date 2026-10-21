@@ -24,7 +24,7 @@ const {
 // Mêmes rôles « portée globale » que stage.controller.js (ACTION_SYSTEM_ROLES)
 const GLOBAL_ROLES = ['ADMIN', 'AGENT_RH', 'AGENT_FINANCIER', 'AGENT_COMMERCIAL'];
 const ADMIN_MODULES = [
-  'STAGE', 'SUIVI_STAGE', 'SUSPENSION_STAGE', 'CANDIDATURES',
+  'STAGE', 'RENOUVELLEMENT', 'SUIVI_STAGE', 'SUSPENSION_STAGE', 'CANDIDATURES',
   'CANDIDATS', 'OFFRE', 'AIDE', 'DEMANDE_AUDIENCE',
 ];
 const JOUR_MS = 24 * 60 * 60 * 1000;
@@ -143,7 +143,9 @@ const construireDashboard = async (user) => {
       label: 'Stages à accepter (convention à joindre)', route: '/dashboard/agent/stages',
     }, Stage, { ...stageWhere, stage_parent_idstage: null, statusStage: 'PROGRAMMATION_EN_COURS' });
   }
-  if (moduleStage && peut('STAGE', 'APPROUVER')) {
+  // ── Renouvellements (module RENOUVELLEMENT) ──────────────────────────────
+  const moduleRenouv = aModule('RENOUVELLEMENT');
+  if (moduleRenouv && peut('RENOUVELLEMENT', 'APPROUVER')) {
     await ajouter({
       cle: 'RENOUVELLEMENTS_A_APPROUVER', module: 'RENOUVELLEMENT', action: 'APPROUVER',
       label: 'Renouvellements à approuver', route: '/dashboard/agent/renouvellements',
@@ -151,14 +153,15 @@ const construireDashboard = async (user) => {
     { del: 0, statusRenouvellement: { [Op.in]: ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT'] } },
     renouvInclude(dirStage), 'dateRenouvellement');
   }
-  if (moduleStage && peut('STAGE', 'VALIDER')) {
+  if (moduleRenouv && peut('RENOUVELLEMENT', 'VALIDER')) {
     await ajouter({
       cle: 'RENOUVELLEMENTS_A_ACCEPTER', module: 'RENOUVELLEMENT', action: 'VALIDER',
       label: 'Renouvellements à accepter (convention à joindre)', route: '/dashboard/agent/renouvellements',
     }, RenouvellementStage,
     { del: 0, statusRenouvellement: 'PROGRAMMATION_EN_COURS' },
     renouvInclude(dirStage), 'dateRenouvellement');
-
+  }
+  if (moduleStage && peut('STAGE', 'VALIDER')) {
     await ajouter({
       cle: 'RAPPORTS_A_EVALUER', module: 'RAPPORT', action: 'VALIDER',
       label: 'Rapports de stage à évaluer', route: '/dashboard/agent/rapports',

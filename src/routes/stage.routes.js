@@ -4,7 +4,7 @@ const router = express.Router();
 const multer = require('multer');
 const stageController = require('../controllers/stage.controller');
 const validate = require('../middlewares/validate.middleware');
-const { authenticate, authorize, authorizeModule, authorizeAction, authorizeAnyAction } = require('../middlewares/auth.middleware');
+const { authenticate, authorize, authorizeModule, authorizeAction, authorizeAnyAction, authorizeActionSurStage } = require('../middlewares/auth.middleware');
 const paginationMiddleware = require('../middlewares/pagination.middleware');
 const { validatePdfFiles } = require('../middlewares/validateFiles.middleware');
 const {
@@ -252,24 +252,24 @@ router.get(
 /**
  * @route   GET /api/stages/renouvellements
  * @desc    Obtenir tous les renouvellements
- * @access  Private (ADMIN ou permission STAGE)
+ * @access  Private (ADMIN ou module RENOUVELLEMENT)
  */
 router.get(
   '/renouvellements',
   authenticate,
-  authorizeModule('STAGE'),
+  authorizeModule('RENOUVELLEMENT'),
   stageController.getAllRenouvellements
 );
 
 /**
  * @route   GET /api/stages/renouvellements/:id/lettre
  * @desc    Télécharger la lettre de demande de renouvellement (soumise par le candidat)
- * @access  Private (ADMIN ou permission STAGE)
+ * @access  Private (ADMIN ou module RENOUVELLEMENT)
  */
 router.get(
   '/renouvellements/:id/lettre',
   authenticate,
-  authorizeModule('STAGE'),
+  authorizeModule('RENOUVELLEMENT'),
   stageController.downloadLettreRenouvellement
 );
 
@@ -279,7 +279,7 @@ router.get(
 router.get(
   '/renouvellements/:id/convention',
   authenticate,
-  authorizeModule('STAGE'),
+  authorizeModule('RENOUVELLEMENT'),
   stageController.downloadConventionRenouvellement
 );
 
@@ -290,7 +290,7 @@ router.get(
 router.get(
   '/renouvellements/:id/convention-demande',
   authenticate,
-  authorizeModule('STAGE'),
+  authorizeModule('RENOUVELLEMENT'),
   stageController.downloadConventionDemandeRenouvellement
 );
 
@@ -308,24 +308,24 @@ router.put(
 /**
  * @route   PUT /api/stages/renouvellements/:id/approuver
  * @desc    Approuver une demande de renouvellement (admin ou agent — EN_ATTENTE / EN_COURS_DE_TRAITEMENT → PROGRAMMATION_EN_COURS)
- * @access  Private — permission APPROUVER sur STAGE requise
+ * @access  Private — permission APPROUVER sur RENOUVELLEMENT requise
  */
 router.put(
   '/renouvellements/:id/approuver',
   authenticate,
-  authorizeAction('STAGE', 'APPROUVER'),
+  authorizeAction('RENOUVELLEMENT', 'APPROUVER'),
   stageController.approuverRenouvellement
 );
 
 /**
  * @route   PUT /api/stages/renouvellements/:id/evaluer
  * @desc    Accepter (avec la convention, champ conventionStage) ou refuser une demande de renouvellement
- * @access  Private — permission VALIDER ou REJETER sur STAGE requise
+ * @access  Private — permission VALIDER ou REJETER sur RENOUVELLEMENT requise
  */
 router.put(
   '/renouvellements/:id/evaluer',
   authenticate,
-  authorizeAnyAction('STAGE', ['VALIDER', 'REJETER']),
+  authorizeAnyAction('RENOUVELLEMENT', ['VALIDER', 'REJETER']),
   // Convention jointe à l'acceptation (comme PUT /:id/statut pour une demande de stage)
   uploadConvention.single('conventionStage'),
   validatePdfFiles,
@@ -739,12 +739,12 @@ router.get(
 /**
  * @route   PUT /api/stages/:id/convention
  * @desc    Remplacer la convention de stage (admin / agent avec permission CREER)
- * @access  Private — permission CREER sur STAGE requise
+ * @access  Private — permission CREER sur STAGE (ou RENOUVELLEMENT pour le stage d'un renouvellement)
  */
 router.put(
   '/:id/convention',
   authenticate,
-  authorizeAction('STAGE', 'CREER'),
+  authorizeActionSurStage('CREER'),
   uploadConvention.single('conventionStage'),
   validatePdfFiles,
   stageController.remplacerConventionStage
@@ -753,12 +753,12 @@ router.put(
 /**
  * @route   PUT /api/stages/:id
  * @desc    Modifier un stage (dates effectives, commentaire)
- * @access  Private — permission MODIFIER sur STAGE requise
+ * @access  Private — permission MODIFIER sur STAGE (ou RENOUVELLEMENT pour le stage d'un renouvellement)
  */
 router.put(
   '/:id',
   authenticate,
-  authorizeAction('STAGE', 'MODIFIER'),
+  authorizeActionSurStage('MODIFIER'),
   validate(updateStageSchema),
   stageController.updateStage
 );
