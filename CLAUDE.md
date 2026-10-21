@@ -162,8 +162,8 @@ pares-frontend/src/features/dashboard/
   (`PUT /stages/:id/convention`) reste soumis à **CREER**. Stockée sur le nouveau stage (document_stage) ;
   affichée comme pour un stage (ligne « Convention jointe » + Voir / remplacer). Le ✓ de la liste = accepter avec
   la convention ; « Approuver » se fait depuis le détail.
-  Les colonnes `renouvellement_stage.conventionStageEnCours*` ne sont plus utilisées (à supprimer plus tard
-  par migration après vérification en production).
+  Les anciennes colonnes `renouvellement_stage.conventionStageEnCours*` sont supprimées
+  (`migration_prod_drop_convention_stage_en_cours.sql`, 2026-10-21).
 - **Circuit comme les stages** :
   - Admin : **Traiter** (`PUT /stages/renouvellements/:id/traiter`) puis **Accepter / Refuser dès EN_ATTENTE**.
   - Agent : **Approuver** (EN_ATTENTE) → **Accepter** (PROGRAMMATION_EN_COURS, permission VALIDER) → **Refuser**
@@ -222,11 +222,12 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
 - Backend : `stage.service.js` (`createRapport`, `getAutorisationActive`) ; `'conventionStageEnCours'` retiré de
   `RENOUVELLEMENT_DOCUMENT_KEYS` (aucune donnée ne l'utilisait ; la partie « lettre » de `remplacerDocumentStage` reste).
 
+- Base (2026-10-21, accord de l'utilisateur) : colonnes `renouvellement_stage.conventionStageEnCours`, `_filename`,
+  `_size`, `_path` supprimées (`migration_prod_drop_convention_stage_en_cours.sql`) et retirées du modèle et des
+  services. Vérifié avant : 16 lignes, toutes copies identiques de la convention de la demande d'origine (gardée dans
+  document_stage), chemins disque tous référencés par document_stage. **Sauvegarder la base avant `npm run migrate`.**
+
 **Reste à faire :**
-- Base : colonnes `renouvellement_stage.conventionStageEnCours`, `_filename`, `_size`, `_path` (copies de la
-  convention de la demande d'origine, plus lues par les écrans ; encore listées dans `RENOUV_ATTRS` de
-  `getAllRenouvellements` et dans le modèle) → migration `ALTER TABLE … DROP COLUMN` + retrait du modèle et des
-  attributs, après sauvegarde et avec l'accord de l'utilisateur.
 - Passe complète sur le reste du projet (aides, offres, audiences, agents…), non encore analysés.
 
 ### Autres points en attente

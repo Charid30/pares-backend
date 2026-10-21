@@ -677,7 +677,7 @@ const getStageById = async (id, user = null) => {
         where: { del: 0 },
         // Exclure les BLOBs, garder seulement les métadonnées
         attributes: {
-          exclude: ['lettreMotivationRenouvellement', 'conventionStageEnCours']
+          exclude: ['lettreMotivationRenouvellement']
         },
         limit: 1, // Un seul renouvellement possible par stage
       },
@@ -1276,7 +1276,6 @@ const getAllRenouvellements = async (filters = {}, agentContext = null) => {
   const RENOUV_ATTRS = [
     'idrenouvellement', 'stage_actuel_idstage', 'stage_nouveau_idstage',
     'lettreMotivationRenouvellement_filename', 'lettreMotivationRenouvellement_size', 'lettreMotivationRenouvellement_path',
-    'conventionStageEnCours_filename', 'conventionStageEnCours_size', 'conventionStageEnCours_path',
     'dureeDemandee', 'statusRenouvellement', 'motifRefus', 'dateRenouvellement',
     'lettreNonConforme', 'conventionNonConforme', 'resoumis',
     'createdBy', 'lastModifiedDate', 'lastModifiedBy',

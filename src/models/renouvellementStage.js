@@ -29,19 +29,6 @@ module.exports = (sequelize) => {
       type: DataTypes.STRING(500),
       allowNull: true,
     },
-    conventionStageEnCours: {
-      type: DataTypes.BLOB('medium'),
-    },
-    conventionStageEnCours_filename: {
-      type: DataTypes.STRING(255),
-    },
-    conventionStageEnCours_size: {
-      type: DataTypes.INTEGER,
-    },
-    conventionStageEnCours_path: {
-      type: DataTypes.STRING(500),
-      allowNull: true,
-    },
     dureeDemandee: {
       type: DataTypes.INTEGER,
       allowNull: false,
