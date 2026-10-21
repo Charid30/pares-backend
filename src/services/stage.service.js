@@ -921,7 +921,7 @@ const remplacerDocumentStage = async (id, type, file, candidatId) => {
   const filePath = fileStorage.saveFile(file.buffer, file.originalname, 'stages');
 
   if (RENOUVELLEMENT_DOCUMENT_KEYS.includes(type)) {
-    // Document stocké dans renouvellement_stage (lettre de renouvellement ou convention en cours)
+    // Document stocké dans renouvellement_stage (lettre de renouvellement)
     const renouvellement = await RenouvellementStage.findOne({
       where: { stage_nouveau_idstage: id },
     });
@@ -1844,50 +1844,6 @@ const resoumettreRenouvellement = async (id, candidatId, files = {}) => {
 // =====================================================
 // RAPPORTS
 // =====================================================
-
-/**
- * Créer un rapport de stage
- */
-const createRapport = async (candidatId, data, file) => {
-  // Vérifier que le stage existe, est expiré et appartient au candidat
-  const stage = await Stage.findOne({
-    where: { 
-      idstage: data.stage_idstage,
-      candidats_idcandidats: candidatId,
-      statusStage: 'EXPIRE',
-      del: 0,
-    },
-  });
-  
-  if (!stage) {
-    throw new Error('Stage non trouvé ou non éligible pour un rapport');
-  }
-  
-  // Vérifier qu'un rapport n'existe pas déjà
-  const existingRapport = await RapportStage.findOne({
-    where: { stage_idstage: data.stage_idstage, del: 0 },
-  });
-  
-  if (existingRapport) {
-    throw new Error('Un rapport existe déjà pour ce stage');
-  }
-  
-  if (!file) {
-    throw new Error('Le fichier PDF du rapport est requis');
-  }
-  
-  return await RapportStage.create({
-    stage_idstage: data.stage_idstage,
-    titreRapport: data.titreRapport,
-    natureRapport: data.natureRapport,
-    rapportPdf: null,
-    rapportPdf_path: fileStorage.saveFile(file.buffer, file.originalname, 'rapports'),
-    rapportPdf_filename: file.originalname,
-    rapportPdf_size: file.size,
-    statusRapport: 'SOUMIS',
-    createdBy: candidatId,
-  });
-};
 
 /**
  * Obtenir tous les rapports (pour agents)
@@ -3070,21 +3026,6 @@ const autoriserRapportStage = async (stageId, agentId, agentContext = null) => {
   return { ...autorisation.toJSON(), candidat: racine.candidat };
 };
 
-/**
- * Récupère l'autorisation active (non expirée, non utilisée, non supprimée) pour un stage.
- * Retourne null si aucune n'existe.
- */
-const getAutorisationActive = async (stageId) => {
-  return AutorisationRenouvellementStage.findOne({
-    where: {
-      stage_idstage: stageId,
-      del: 0,
-      usedAt: null,
-      expiresAt: { [Op.gt]: new Date() },
-    },
-  });
-};
-
 module.exports = {
   // Utilitaires (exporté pour réutilisation)
   calculerDateFin,
@@ -3131,7 +3072,6 @@ module.exports = {
   downloadConventionRenouvellement,
 
   // Rapports
-  createRapport,
   getAllRapports,
   getRapportById,
   evaluateRapport,
@@ -3155,5 +3095,4 @@ module.exports = {
   // Autorisation de renouvellement
   autoriserRenouvellementStage,
   autoriserRapportStage,
-  getAutorisationActive,
 };

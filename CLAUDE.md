@@ -210,43 +210,28 @@ l'être (schéma + code cohérents), et **retirer tout le code mort**. L'utilisa
 supprimer sur le poste de dev : le nettoyage se fait lors de la mission (en suivant la procédure ci-dessus
 pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `npx jest --runInBand`.
 
-### Code mort identifié (vérifié par recherche dans tout le projet, le 2026-10-17)
+### Code mort
 
-**Devenu mort suite aux changements du 2026-10-14 :**
-- `pares-frontend/.../admin/stages/stages-list.ts` : `toggleFiltreEnCours()`, `toggleArchives()`
-  (remplacés par les onglets `changerVue()`).
-- Ancien modèle « Convention du stage en cours » fournie par le candidat (règle abandonnée) — toujours affiché
-  « Convention non disponible » :
-  - `admin/stages/stages-list.html` (~l.949-981) : bloc « Convention en cours » dans « Documents de renouvellement »
-    + template `#noConventionRenouv` ; `stages-list.ts` : `accederConventionRenouvellement()`,
-    alias `downloadConventionRenouvellement()`, entrée `conventionStageEnCours` de `DOCUMENTS_RENOUVELLEMENT`
-    (garder l'entrée `lettreMotivationRenouvellement`).
-  - `agent/modules/stage/agent-stage.html` (~l.838-864) : même bloc ; `agent-stage.ts` : champ
-    `conventionStageEnCours_filename`, `accederConventionRenouvellement()`.
-  - `core/services/admin-stage.service.ts` : champs `conventionStageEnCours_filename/_size` ;
-    vérifier si `downloadConventionRenouvellement()` est encore appelé après nettoyage.
-  - `candidat/stages/stages.ts` (~l.1299) : libellé `conventionStageEnCours`.
-  - Backend : `'conventionStageEnCours'` dans `RENOUVELLEMENT_DOCUMENT_KEYS` (stage.validator.js) et la partie
-    correspondante de `remplacerDocumentStage` (stage.service.js) — **la partie « lettre » est encore utilisée**
-    (rejet d'un stage de renouvellement depuis l'écran Stages), ne pas la supprimer ;
-    colonnes lues dans `RENOUV_ATTRS` de `getAllRenouvellements`.
-  - Base : colonnes `renouvellement_stage.conventionStageEnCours`, `_filename`, `_size`, `_path` →
-    vérifier en production qu'elles ne contiennent rien à conserver
-    (`SELECT COUNT(*), SUM(conventionStageEnCours_filename IS NOT NULL) FROM renouvellement_stage;`),
-    puis migration `ALTER TABLE … DROP COLUMN` (après sauvegarde, avec l'accord de l'utilisateur).
+**Retiré le 2026-10-21** (chaque élément vérifié par recherche dans le frontend ET le backend) :
+- Frontend : `stages-list.ts` (`toggleFiltreEnCours`, `toggleArchives`, `onSearch`, `formatDateTime`,
+  `accederConventionRenouvellement` + 3 alias « rétrocompatibilité », entrée `conventionStageEnCours`) ; bloc
+  « Convention en cours » du détail d'un stage de renouvellement (admin et agent) ; `agent-stage.ts`
+  (`accederConventionRenouvellement`, champ `conventionStageEnCours_filename`) ; `candidat/stages/stages.ts`
+  (`closeCalendar`, `niveauxSoutenance`, `niveauxPerfectionnement`, `telechargerConvention`, libellé
+  `conventionStageEnCours`) ; `admin-stage.service.ts` (`downloadConventionRenouvellement`, 2 champs).
+- Backend : `stage.service.js` (`createRapport`, `getAutorisationActive`) ; `'conventionStageEnCours'` retiré de
+  `RENOUVELLEMENT_DOCUMENT_KEYS` (aucune donnée ne l'utilisait ; la partie « lettre » de `remplacerDocumentStage` reste).
 
-**Déjà mort avant :**
-- `admin/stages/stages-list.ts` : `onSearch()` (ancienne recherche locale), `formatDateTime()`.
-- `candidat/stages/stages.ts` : `closeCalendar()`, `niveauxSoutenance`, `niveauxPerfectionnement`, `telechargerConvention()`.
-- `pares-backend/src/services/stage.service.js` : `getAutorisationActive()` (exporté, jamais appelé — les écrans
-  ont leur propre version).
-- Faire une passe complète sur le reste du projet (autres modules : aides, offres, audiences, agents…),
-  non encore analysés.
+**Reste à faire :**
+- Base : colonnes `renouvellement_stage.conventionStageEnCours`, `_filename`, `_size`, `_path` (copies de la
+  convention de la demande d'origine, plus lues par les écrans ; encore listées dans `RENOUV_ATTRS` de
+  `getAllRenouvellements` et dans le modèle) → migration `ALTER TABLE … DROP COLUMN` + retrait du modèle et des
+  attributs, après sauvegarde et avec l'accord de l'utilisateur.
+- Passe complète sur le reste du projet (aides, offres, audiences, agents…), non encore analysés.
 
 ### Autres points en attente
 
 - 3 tests backend obsolètes à mettre à jour (voir « Tests »).
-- `createRapport` (stage.service.js) n'est plus appelé (la route redirige vers candidat.service) : code mort.
 - « Mes stages » côté candidat affiche encore le stage du renouvellement comme une carte à part (et le compte
   dans le total) — à décider avec l'utilisateur (regrouper la chaîne sur une seule carte ?).
 - Notifications candidat manquantes : renouvellement « en traitement », convention du renouvellement jointe.

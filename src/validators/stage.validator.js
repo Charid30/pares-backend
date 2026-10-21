@@ -5,7 +5,7 @@ const Joi = require('joi');
 const DOCUMENT_KEYS = ['cv', 'cnib', 'casierJudiciaire', 'lettreMotivation', 'lettreRecommandation', 'dernierDiplome'];
 
 // Clés des documents d'un renouvellement (stockés dans la table renouvellement)
-const RENOUVELLEMENT_DOCUMENT_KEYS = ['lettreMotivationRenouvellement', 'conventionStageEnCours'];
+const RENOUVELLEMENT_DOCUMENT_KEYS = ['lettreMotivationRenouvellement'];
 
 // Toutes les clés acceptées comme "documents non conformes" lors d'un rejet
 const ALL_DOCUMENT_KEYS = [...DOCUMENT_KEYS, ...RENOUVELLEMENT_DOCUMENT_KEYS];
