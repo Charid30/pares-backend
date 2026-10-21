@@ -307,7 +307,7 @@ router.put(
 
 /**
  * @route   PUT /api/stages/renouvellements/:id/approuver
- * @desc    Approuver une demande de renouvellement (agent — passe en PROGRAMMATION_EN_COURS)
+ * @desc    Approuver une demande de renouvellement (admin ou agent — EN_ATTENTE / EN_COURS_DE_TRAITEMENT → PROGRAMMATION_EN_COURS)
  * @access  Private — permission APPROUVER sur STAGE requise
  */
 router.put(

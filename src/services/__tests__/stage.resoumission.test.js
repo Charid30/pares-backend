@@ -246,6 +246,21 @@ describe('circuit « comme les stages » (Traiter / Accepter dès EN_ATTENTE pou
     expect(renouvellement.statusRenouvellement).toBe('REJETE');
   });
 
+  test('Approuver est possible après Traiter (EN_COURS_DE_TRAITEMENT → PROGRAMMATION_EN_COURS)', async () => {
+    const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
+    const candidat = await creerCandidat();
+    const { renouvellement } = await creerRenouvellement(direction, candidat.idcandidats, '2026-03-31', 'EN_ATTENTE');
+
+    await stageService.mettreEnTraitementRenouvellement(renouvellement.idrenouvellement, { isSystemRole: true });
+    await stageService.approuverRenouvellement(renouvellement.idrenouvellement, { isSystemRole: true });
+
+    await renouvellement.reload();
+    expect(renouvellement.statusRenouvellement).toBe('PROGRAMMATION_EN_COURS');
+    // Déjà approuvé : une seconde approbation est refusée
+    await expect(stageService.approuverRenouvellement(renouvellement.idrenouvellement, { isSystemRole: true }))
+      .rejects.toThrow('ne peut pas être approuvé');
+  });
+
   test('la convention affichée est celle de la demande de stage (stage actuel)', async () => {
     const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
     const candidat = await creerCandidat();

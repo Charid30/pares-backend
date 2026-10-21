@@ -328,3 +328,11 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
   (**à appliquer en production**). Écrans admin et agent : la convention est envoyée **avant** l'acceptation
   (si l'envoi échoue, rien n'est accepté ; erreur dans le modal) ; `conventionDejaJointe` évite un double envoi.
 - Tests sur la copie de prod : couper e-mails et push (adresses réelles des candidats).
+- **ZONGO (renouvellement n°1)** : stage accepté avec convention (01/07 → 31/08) mais revenu EN_ATTENTE après
+  refus « Doublon » + réouverture. Migration `migration_prod_stages_convention_en_attente.sql` : tout stage avec
+  convention encore « avant décision » prend le statut de ses dates (ACCEPTE / EN_COURS / EXPIRE) et son
+  renouvellement le même statut final (pas d'e-mail « expiré » du job). **À appliquer en production.**
+- **Approuver un renouvellement** : bouton « Approuver » ajouté au détail admin (EN_ATTENTE / En traitement →
+  PROGRAMMATION_EN_COURS) ; l'agent peut aussi approuver un dossier « En traitement ». Le ✓ de la liste = accepter
+  avec la convention. `approuverRenouvellement` lisait une colonne inexistante (`dureeStageMois`, depuis le
+  2026-10-12) : **toute approbation de renouvellement échouait** — corrigé (`dureeStage`), test ajouté.

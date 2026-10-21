@@ -1362,7 +1362,7 @@ const approuverRenouvellement = async (id, agentContext = null) => {
       {
         model: Stage,
         as: 'stageNouveau',
-        attributes: ['idstage', 'direction_iddirection', 'domaineStage', 'dureeStageMois'],
+        attributes: ['idstage', 'direction_iddirection', 'domaineStage', 'dureeStage'],
         include: [{ model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom', 'email'] }],
       },
     ],
@@ -1372,7 +1372,8 @@ const approuverRenouvellement = async (id, agentContext = null) => {
     throw new Error('Renouvellement non trouvé');
   }
 
-  if (renouvellement.statusRenouvellement !== 'EN_ATTENTE') {
+  // Comme pour une demande de stage : approbation possible avant ou après la mise en traitement
+  if (!['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT'].includes(renouvellement.statusRenouvellement)) {
     throw new Error(`Le renouvellement ne peut pas être approuvé (statut actuel : ${renouvellement.statusRenouvellement})`);
   }
 
