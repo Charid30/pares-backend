@@ -321,3 +321,10 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
   **À appliquer en production** avec les deux migrations ci-dessus.
 - Constaté, non corrigé (à décider) : direction 8 sans agent (renouvellement n°10 visible de l'admin seul) ;
   statut du renouvellement ≠ statut de son stage enfant (n°2 à 7, 10) ; `renouvellement_stage.createdDate` NULL.
+- **Convention jointe à l'acceptation d'un renouvellement jamais enregistrée** : en production
+  `document_stage.document` était NOT NULL alors que le code écrit NULL (fichier sur disque) → tout INSERT de
+  document (`POST /stages/documents` : conventions de renouvellement, attestations) échouait ; le renouvellement
+  restait « Accepté » sans convention. Migration `migration_prod_document_stage_document_nullable.sql`
+  (**à appliquer en production**). Écrans admin et agent : la convention est envoyée **avant** l'acceptation
+  (si l'envoi échoue, rien n'est accepté ; erreur dans le modal) ; `conventionDejaJointe` évite un double envoi.
+- Tests sur la copie de prod : couper e-mails et push (adresses réelles des candidats).
