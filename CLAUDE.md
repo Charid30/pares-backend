@@ -375,3 +375,6 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
   `migration_prod_ranger_fichiers_stage.js` (copie → chemins en base en transaction → suppression des anciens fichiers
   non référencés) ; sur la copie : 34 conventions + 1 lettre rangées, 0 chemin cassé. **Sauvegarder la base ET
   `uploads/` avant `npm run migrate`.** Les 46 conventions stockées en BLOB (sans fichier) ne sont pas concernées.
+- **Doublons d'envois échoués** supprimés (`migration_prod_supprimer_doublons_echoues.js`) : fichier non référencé ET
+  identique (SHA-256) à un fichier rattaché — 1 convention (TAPSOBA, stage 128) et 3 rapports (SERE, stage 156) sur la
+  copie ; un fichier non référencé unique est conservé et signalé. Sauvegarder `uploads/` avant `npm run migrate`.
