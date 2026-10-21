@@ -94,6 +94,13 @@ pares-frontend/src/features/dashboard/
 - Multi-directions : table `agents_directions` ; `agents.direction_iddirection` conservé (= 1re direction).
 - Fichiers : `fileStorage.saveFile(buffer, nom, sousDossier)` (stockage disque, `*_path`) ;
   les colonnes BLOB ne sont qu'un repli pour les anciens fichiers (`fileStorage.readFile(path, blob)`).
+  Rangement dans `uploads/` (2026-10-21) : `stages/` (pièces de la demande), `renouvellements/` (lettres de
+  renouvellement), `conventions/stages/` et `conventions/renouvellements/` (`dossierConvention(stage)` dans
+  stage.service.js), `attestations/`, `rapports/`. Les anciens dossiers `conventions/` (racine) et
+  `documents-stage/` ne reçoivent plus rien (fichiers existants rangés par `migration_prod_ranger_fichiers_stage.js`).
+- Migrations `.js` : `npm run migrate` exécute aussi les fichiers `migrations/*.js` qui exportent
+  `up(connection, { uploadsRoot, log })` — réservé aux opérations qui touchent les fichiers déposés.
+  Test sur une copie : `DB_NAME=pares_db_test MIGRATION_UPLOADS_ROOT=<copie de uploads> node scripts/run-migrations.js`.
 - Upload d'un document de stage (`POST /stages/documents`) : **`dateEmission` est obligatoire**.
 
 ### Frontend Angular
@@ -363,3 +370,8 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
 - **Incident (poste de dev)** : le `nodemon` local, branché sur la copie de prod, a rechargé le nouveau job pendant son
   écriture → 338 demandes passées « En traitement » dans `pares_db` local, notifications push probablement reçues par
   98 candidats et 2 agents, relance de 3 agents (e-mail incertain). Arrêter tout serveur local avant de modifier un job.
+- **Rangement des fichiers de stage** : nouveaux dossiers `conventions/stages/`, `conventions/renouvellements/`,
+  `attestations/`, `renouvellements/` (aussi pour les lettres remplacées) ; migration `.js`
+  `migration_prod_ranger_fichiers_stage.js` (copie → chemins en base en transaction → suppression des anciens fichiers
+  non référencés) ; sur la copie : 34 conventions + 1 lettre rangées, 0 chemin cassé. **Sauvegarder la base ET
+  `uploads/` avant `npm run migrate`.** Les 46 conventions stockées en BLOB (sans fichier) ne sont pas concernées.

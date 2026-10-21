@@ -125,7 +125,7 @@ describe('evaluateRenouvellement', () => {
     expect(stageNouveau.dateDebutEffective).toBe('2026-04-01'); // lendemain du 31 mars
     expect(stageNouveau.statusStage).toBe('EN_COURS'); // convention jointe et date de début passée
     const convention = await DocumentStage.findOne({ where: { stage_idstage: stageNouveau.idstage, typeDocument: 'CONVENTION' } });
-    expect(convention.document_path).toBe('uploads/conventions/fake-path.pdf');
+    expect(convention.document_path).toBe('uploads/conventions/renouvellements/fake-path.pdf'); // rangée avec les conventions des renouvellements
     expect(convention.agents_idagents).toBe(agent.idagents);
   });
 
@@ -325,6 +325,17 @@ describe('createDocumentStage (convention)', () => {
 
     await stage.reload();
     expect(stage.statusStage).toBe('EN_COURS');
+  });
+
+  test('rangement sur disque : convention de la demande et convention du renouvellement', async () => {
+    const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
+    const candidat = await creerCandidat();
+    const demande = await creerStage(direction, candidat.idcandidats, { statusStage: 'EXPIRE' });
+    const renouvellement = await creerStage(direction, candidat.idcandidats, { statusStage: 'EXPIRE', stage_parent_idstage: demande.idstage });
+    const joindre = (stageId, typeDocument) => stageService.createDocumentStage(null, { stage_idstage: stageId, typeDocument, dateEmission: '2026-01-01' }, fauxPdf);
+
+    expect((await joindre(demande.idstage, 'CONVENTION')).document_path).toBe('uploads/conventions/stages/fake-path.pdf');
+    expect((await joindre(renouvellement.idstage, 'CONVENTION')).document_path).toBe('uploads/conventions/renouvellements/fake-path.pdf');
   });
 });
 

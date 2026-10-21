@@ -29,6 +29,9 @@ const notifierCandidat = (candidatId, type, titre, message) => {
     .catch(e => console.error('❌ Notification candidat:', e.message));
 };
 
+/** Dossier de rangement d'une convention : demande de stage ou renouvellement (stage enfant). */
+const dossierConvention = (stage) => (stage.stage_parent_idstage ? 'conventions/renouvellements' : 'conventions/stages');
+
 // Avant la convention, une demande de stage peut encore être refusée
 const STATUTS_AVANT_CONVENTION = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'];
 const { getAgentDirectionIds } = require('../utils/agentDirections.util');
@@ -814,7 +817,7 @@ const updateStatusStage = async (id, data, file = null, agentId = null, agentCon
     }
 
     // Creer le document de convention dans document_stage (stockage disque)
-    const conventionPath = fileStorage.saveFile(file.buffer, file.originalname, 'conventions');
+    const conventionPath = fileStorage.saveFile(file.buffer, file.originalname, dossierConvention(stage));
     await DocumentStage.create({
       stage_idstage: id,
       rapport_idrapport: null,
@@ -918,7 +921,8 @@ const remplacerDocumentStage = async (id, type, file, candidatId) => {
 
   const documentsRestants = documentsRejetes.filter((k) => k !== type);
   const newDocumentsRejetes = documentsRestants.length > 0 ? JSON.stringify(documentsRestants) : null;
-  const filePath = fileStorage.saveFile(file.buffer, file.originalname, 'stages');
+  const filePath = fileStorage.saveFile(file.buffer, file.originalname,
+    RENOUVELLEMENT_DOCUMENT_KEYS.includes(type) ? 'renouvellements' : 'stages');
 
   if (RENOUVELLEMENT_DOCUMENT_KEYS.includes(type)) {
     // Document stocké dans renouvellement_stage (lettre de renouvellement)
@@ -1132,7 +1136,7 @@ const remplacerConventionStage = async (stageId, agentId, file, agentContext = n
     where: { stage_idstage: stageId, typeDocument: 'CONVENTION', del: 0 },
   });
 
-  const nouveauPath = fileStorage.saveFile(file.buffer, file.originalname, 'documents-stage');
+  const nouveauPath = fileStorage.saveFile(file.buffer, file.originalname, dossierConvention(stage));
 
   if (ancienneConvention) {
     // Supprimer l'ancien fichier disque si possible (non bloquant)
@@ -1682,7 +1686,7 @@ const evaluateRenouvellement = async (id, data, agentContext = null, file = null
   const agentNomEval = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
   // La convention du renouvellement est jointe par l'agent/admin (document_stage du nouveau
   // stage), pas par le candidat : seule la lettre peut être signalée non conforme.
-  const conventionPath = file ? fileStorage.saveFile(file.buffer, file.originalname, 'conventions') : null;
+  const conventionPath = file ? fileStorage.saveFile(file.buffer, file.originalname, 'conventions/renouvellements') : null;
   const transaction = await sequelize.transaction();
   try {
     const decision = { ...data };
@@ -2070,7 +2074,8 @@ const createDocumentStage = async (agentId, data, file) => {
     agents_idagents: agentId,
     typeDocument: data.typeDocument,
     document: null,
-    document_path: fileStorage.saveFile(file.buffer, file.originalname, 'documents-stage'),
+    document_path: fileStorage.saveFile(file.buffer, file.originalname,
+      data.typeDocument === 'ATTESTATION' ? 'attestations' : dossierConvention(stage)),
     document_filename: file.originalname,
     document_size: file.size,
     numeroAttestation: data.numeroAttestation || null,

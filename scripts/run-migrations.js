@@ -1,6 +1,8 @@
 // scripts/run-migrations.js
 // Applique automatiquement les fichiers SQL du dossier migrations/ qui n'ont pas
 // encore été joués sur cette base, dans l'ordre alphabétique des noms de fichiers.
+// Une migration peut aussi être un fichier .js exportant `up(connection, { uploadsRoot, log })` :
+// réservé aux opérations qui touchent aussi les fichiers déposés (uploads/).
 // Garde la trace des migrations déjà appliquées dans la table `_migrations_history`
 // pour ne jamais rejouer deux fois le même fichier.
 //
@@ -12,6 +14,8 @@ const mysql = require('mysql2/promise');
 const env = require('../src/config/env');
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations');
+// Dossier des fichiers déposés ; surchargeable pour tester une migration .js sur une copie
+const UPLOADS_ROOT = process.env.MIGRATION_UPLOADS_ROOT || path.join(__dirname, '..', 'uploads');
 
 const c = {
   reset: '\x1b[0m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m',
@@ -47,7 +51,7 @@ async function main() {
     }
 
     const files = fs.readdirSync(MIGRATIONS_DIR)
-      .filter(f => f.endsWith('.sql'))
+      .filter(f => f.endsWith('.sql') || f.endsWith('.js'))
       .sort();
 
     const pending = files.filter(f => !already.has(f));
@@ -61,11 +65,16 @@ async function main() {
 
     for (const filename of pending) {
       const filePath = path.join(MIGRATIONS_DIR, filename);
-      const sql = fs.readFileSync(filePath, 'utf8');
 
       process.stdout.write(`→ Application de ${filename}... `);
       try {
-        await connection.query(sql);
+        if (filename.endsWith('.js')) {
+          const migration = require(filePath);
+          await migration.up(connection, { uploadsRoot: UPLOADS_ROOT, log: (m) => console.log(`
+    ${m}`) });
+        } else {
+          await connection.query(fs.readFileSync(filePath, 'utf8'));
+        }
         await connection.query(
           'INSERT INTO `_migrations_history` (filename) VALUES (?)',
           [filename]

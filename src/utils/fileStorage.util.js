@@ -23,10 +23,13 @@ const ALLOWED_SUBFOLDERS = new Set([
   'recrutements',
   'candidats',
   'agents',
-  'conventions',
+  'conventions',               // ancien dossier (conventions avant le 2026-10-21)
+  'conventions/stages',        // conventions des demandes de stage
+  'conventions/renouvellements', // conventions des renouvellements
+  'attestations',              // attestations de stage
   'temp',
-  'renouvellements',
-  'documents-stage',
+  'renouvellements',           // lettres de renouvellement
+  'documents-stage',           // ancien dossier (conventions jointes après coup, attestations)
   'rapports',
   'candidatures-aide',
   'candidatures-offre',
