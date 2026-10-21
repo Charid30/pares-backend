@@ -144,7 +144,9 @@ describe('demanderRenouvellement', () => {
 
     // Le candidat peut refaire sa demande
     await candidatService.demanderRenouvellement(candidat.idcandidats, stage.idstage, { dureeDemandee: 1 }, fauxFichier);
-    expect(await RenouvellementStage.count({ where: { stage_actuel_idstage: stage.idstage } })).toBe(1);
+    const renouvellement = await RenouvellementStage.findOne({ where: { stage_actuel_idstage: stage.idstage } });
+    expect(renouvellement).not.toBeNull();
+    expect(renouvellement.createdDate).toBeInstanceOf(Date); // date de création renseignée
   });
 
   test('refuse sans lettre de demande', async () => {

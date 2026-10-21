@@ -80,6 +80,10 @@ module.exports = (sequelize) => {
       type: DataTypes.STRING(255),
       allowNull: true,
     },
+    createdDate: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
     del: {
       type: DataTypes.TINYINT,
       defaultValue: 0,

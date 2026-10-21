@@ -378,3 +378,7 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
 - **Doublons d'envois échoués** supprimés (`migration_prod_supprimer_doublons_echoues.js`) : fichier non référencé ET
   identique (SHA-256) à un fichier rattaché — 1 convention (TAPSOBA, stage 128) et 3 rapports (SERE, stage 156) sur la
   copie ; un fichier non référencé unique est conservé et signalé. Sauvegarder `uploads/` avant `npm run migrate`.
+- **Date de création des renouvellements** : `renouvellement_stage.createdDate` était NULL partout (colonne sans
+  valeur par défaut, retirée du modèle le 2026-10-12). Migration `migration_prod_renouvellement_created_date_remplie.sql`
+  (remplie avec `dateRenouvellement`, puis NOT NULL DEFAULT CURRENT_TIMESTAMP) ; colonne remise dans le modèle.
+  Auteur : `createdBy` vide pour 16 demandes → « Candidat » (`migration_prod_renouvellement_created_by_rempli.sql`).
