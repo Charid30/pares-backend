@@ -319,13 +319,16 @@ router.put(
 
 /**
  * @route   PUT /api/stages/renouvellements/:id/evaluer
- * @desc    Évaluer une demande de renouvellement (admin — ACCEPTE ou REJETE)
+ * @desc    Accepter (avec la convention, champ conventionStage) ou refuser une demande de renouvellement
  * @access  Private — permission VALIDER ou REJETER sur STAGE requise
  */
 router.put(
   '/renouvellements/:id/evaluer',
   authenticate,
   authorizeAnyAction('STAGE', ['VALIDER', 'REJETER']),
+  // Convention jointe à l'acceptation (comme PUT /:id/statut pour une demande de stage)
+  uploadConvention.single('conventionStage'),
+  validatePdfFiles,
   validate(evaluateRenouvellementSchema),
   stageController.evaluateRenouvellement
 );

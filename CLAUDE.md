@@ -136,8 +136,12 @@ pares-frontend/src/features/dashboard/
 - **Direction** : reprise de la demande de stage d'origine (remonte la chaîne si besoin).
 - **Documents** : le candidat ne fournit que sa **lettre**. L'admin et l'agent voient la lettre + la
   **convention de la demande de stage** (`GET /stages/renouvellements/:id/convention-demande`).
-- **Convention du renouvellement** : jointe par l'agent habilité (STAGE/CREER) ou l'admin sur le nouveau stage
-  (document_stage), à l'acceptation ; affichée comme pour un stage (ligne « Convention jointe » + Voir / remplacer).
+- **Convention du renouvellement** (validé le 2026-10-21) : **obligatoire à l'acceptation** et envoyée dans le
+  même appel (`PUT /stages/renouvellements/:id/evaluer`, multipart, champ `conventionStage`), comme pour un stage :
+  la permission **VALIDER** suffit (agent de la direction ou admin). Le remplacement / l'ajout après coup
+  (`PUT /stages/:id/convention`) reste soumis à **CREER**. Stockée sur le nouveau stage (document_stage) ;
+  affichée comme pour un stage (ligne « Convention jointe » + Voir / remplacer). Le ✓ de la liste = accepter avec
+  la convention ; « Approuver » se fait depuis le détail.
   Les colonnes `renouvellement_stage.conventionStageEnCours*` ne sont plus utilisées (à supprimer plus tard
   par migration après vérification en production).
 - **Circuit comme les stages** :
@@ -336,3 +340,7 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
   PROGRAMMATION_EN_COURS) ; l'agent peut aussi approuver un dossier « En traitement ». Le ✓ de la liste = accepter
   avec la convention. `approuverRenouvellement` lisait une colonne inexistante (`dureeStageMois`, depuis le
   2026-10-12) : **toute approbation de renouvellement échouait** — corrigé (`dureeStage`), test ajouté.
+- **Acceptation d'un renouvellement en un seul appel** : la convention part avec l'acceptation (VALIDER suffit ;
+  aucun rôle de production n'a STAGE/CREER, les agents acceptaient donc sans convention). Transaction : convention,
+  renouvellement et stage écrits ensemble, fichier supprimé en cas d'échec. Convention de SERE (stage 156) vérifiée :
+  c'est celle de la demande de stage (01/04 → 30/06), aucune convention de renouvellement n'a été jointe.

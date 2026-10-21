@@ -430,7 +430,7 @@ const evaluateRenouvellement = async (req, res) => {
         && await hasGlobalActionAccess(req.user, 'STAGE', [matchingAction])) {
       agentContext.isSystemRole = true;
     }
-    const renouvellement = await stageService.evaluateRenouvellement(req.params.id, req.body, agentContext);
+    const renouvellement = await stageService.evaluateRenouvellement(req.params.id, req.body, agentContext, req.file);
     const statut = req.body.statut || req.body.statusRenouvellement;
     await auditService.log({
       agentId:  req.user.agentId,

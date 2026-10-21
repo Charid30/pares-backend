@@ -119,11 +119,40 @@ describe('evaluateRenouvellement', () => {
     const { stageNouveau, renouvellement } = await creerRenouvellement(direction, candidat.idcandidats, '2026-03-31');
     const agent = await creerAgent(direction.iddirection);
 
-    await stageService.evaluateRenouvellement(renouvellement.idrenouvellement, { statusRenouvellement: 'ACCEPTE' }, { agentId: agent.idagents, isSystemRole: false });
+    await stageService.evaluateRenouvellement(renouvellement.idrenouvellement, { statusRenouvellement: 'ACCEPTE' }, { agentId: agent.idagents, isSystemRole: false }, fauxPdf);
+
+    await stageNouveau.reload();
+    expect(stageNouveau.dateDebutEffective).toBe('2026-04-01'); // lendemain du 31 mars
+    expect(stageNouveau.statusStage).toBe('EN_COURS'); // convention jointe et date de début passée
+    const convention = await DocumentStage.findOne({ where: { stage_idstage: stageNouveau.idstage, typeDocument: 'CONVENTION' } });
+    expect(convention.document_path).toBe('uploads/conventions/fake-path.pdf');
+    expect(convention.agents_idagents).toBe(agent.idagents);
+  });
+
+  test('ACCEPTER avec la convention et une date de début future : reste ACCEPTE', async () => {
+    const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
+    const candidat = await creerCandidat();
+    const { stageNouveau, renouvellement } = await creerRenouvellement(direction, candidat.idcandidats, isoDansNJours(5));
+
+    await stageService.evaluateRenouvellement(renouvellement.idrenouvellement, { statusRenouvellement: 'ACCEPTE' }, { isSystemRole: true }, fauxPdf);
 
     await stageNouveau.reload();
     expect(stageNouveau.statusStage).toBe('ACCEPTE');
-    expect(stageNouveau.dateDebutEffective).toBe('2026-04-01'); // lendemain du 31 mars
+  });
+
+  test('ACCEPTER sans convention est refusé et ne modifie rien', async () => {
+    const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
+    const candidat = await creerCandidat();
+    const { stageNouveau, renouvellement } = await creerRenouvellement(direction, candidat.idcandidats, '2026-03-31');
+
+    await expect(
+      stageService.evaluateRenouvellement(renouvellement.idrenouvellement, { statusRenouvellement: 'ACCEPTE' }, { isSystemRole: true })
+    ).rejects.toThrow('convention du renouvellement est obligatoire');
+
+    await renouvellement.reload();
+    await stageNouveau.reload();
+    expect(renouvellement.statusRenouvellement).toBe('PROGRAMMATION_EN_COURS');
+    expect(stageNouveau.statusStage).toBe('EN_ATTENTE');
   });
 
   test('ACCEPTER avec une date de début et une durée accordée : fin calculée sur la durée accordée', async () => {
@@ -133,7 +162,7 @@ describe('evaluateRenouvellement', () => {
 
     await stageService.evaluateRenouvellement(renouvellement.idrenouvellement, {
       statusRenouvellement: 'ACCEPTE', dateDebutEffective: '2026-05-01', dureeAccordee: 3,
-    }, { isSystemRole: true, isAdmin: true });
+    }, { isSystemRole: true, isAdmin: true }, fauxPdf);
 
     await stageNouveau.reload();
     await renouvellement.reload();
@@ -216,10 +245,10 @@ describe('circuit « comme les stages » (Traiter / Accepter dès EN_ATTENTE pou
     const candidat = await creerCandidat();
     const { stageNouveau, renouvellement } = await creerRenouvellement(direction, candidat.idcandidats, '2026-03-31', 'EN_ATTENTE');
 
-    await stageService.evaluateRenouvellement(renouvellement.idrenouvellement, { statusRenouvellement: 'ACCEPTE' }, { isSystemRole: true, isAdmin: true });
+    await stageService.evaluateRenouvellement(renouvellement.idrenouvellement, { statusRenouvellement: 'ACCEPTE' }, { isSystemRole: true, isAdmin: true }, fauxPdf);
 
     await stageNouveau.reload();
-    expect(stageNouveau.statusStage).toBe('ACCEPTE');
+    expect(stageNouveau.statusStage).toBe('EN_COURS'); // convention jointe, début (01/04) passé
   });
 
   test('un agent ne peut pas accepter un renouvellement non approuvé', async () => {

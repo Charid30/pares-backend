@@ -11,6 +11,7 @@ const {
   Agent,
   Service,
   Direction,
+  sequelize,
 } = require('../models');
 const { Op, literal } = require('sequelize');
 const emailService = require('./email.service');
@@ -1586,7 +1587,13 @@ const supprimerRenouvellement = async (id, agentContext = null) => {
   return { deleted: true };
 };
 
-const evaluateRenouvellement = async (id, data, agentContext = null) => {
+/**
+ * Accepter ou refuser un renouvellement.
+ * Comme pour une demande de stage, l'acceptation reçoit la convention dans le même appel
+ * (permission VALIDER) : elle est obligatoire, sauf si le nouveau stage en a déjà une.
+ * @param {object|null} file - convention (PDF, champ multipart `conventionStage`)
+ */
+const evaluateRenouvellement = async (id, data, agentContext = null, file = null) => {
   const renouvellement = await RenouvellementStage.findOne({
     where: { idrenouvellement: id, del: 0 },
     include: [
@@ -1625,70 +1632,95 @@ const evaluateRenouvellement = async (id, data, agentContext = null) => {
 
   await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
 
+  // Un renouvellement n'est validé que lorsque sa convention est jointe
+  const conventionExistante = data.statusRenouvellement === 'ACCEPTE'
+    ? await DocumentStage.findOne({
+      where: { stage_idstage: renouvellement.stageNouveau.idstage, typeDocument: 'CONVENTION', del: 0 },
+      attributes: ['iddocument'],
+    })
+    : null;
+  if (data.statusRenouvellement === 'ACCEPTE' && !file && !conventionExistante) {
+    throw new Error("La convention du renouvellement est obligatoire lors de l'acceptation");
+  }
+
   const agentNomEval = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
   // La convention du renouvellement est jointe par l'agent/admin (document_stage du nouveau
   // stage), pas par le candidat : seule la lettre peut être signalée non conforme.
-  const decision = { ...data };
-  delete decision.conventionNonConforme;
-  delete decision.dateDebutEffective;
-  delete decision.dateFinEffective;
-  delete decision.dureeAccordee;
-  await renouvellement.update({
-    ...decision,
-    conventionNonConforme: 0,
-    lastModifiedBy: agentNomEval,
-    lastModifiedDate: new Date(),
-  });
+  const conventionPath = file ? fileStorage.saveFile(file.buffer, file.originalname, 'conventions') : null;
+  const transaction = await sequelize.transaction();
+  try {
+    const decision = { ...data };
+    delete decision.conventionNonConforme;
+    delete decision.dateDebutEffective;
+    delete decision.dateFinEffective;
+    delete decision.dureeAccordee;
+    await renouvellement.update({
+      ...decision,
+      conventionNonConforme: 0,
+      lastModifiedBy: agentNomEval,
+      lastModifiedDate: new Date(),
+    }, { transaction });
 
-  if (data.statusRenouvellement === 'ACCEPTE') {
-    const stageActuelDateFin = renouvellement.stageActuel?.dateFinEffective;
+    if (data.statusRenouvellement === 'ACCEPTE') {
+      const stageActuelDateFin = renouvellement.stageActuel?.dateFinEffective;
 
-    let dateDebutEffectiveNouveau = data.dateDebutEffective || null;
-    let dateFinEffectiveNouveau = data.dateFinEffective || null;
-    // Durée accordée (comme pour une demande de stage) — par défaut la durée demandée
-    const dureeAccordee = parseInt(data.dureeAccordee) || renouvellement.dureeDemandee;
+      let dateDebutEffectiveNouveau = data.dateDebutEffective || null;
+      let dateFinEffectiveNouveau = data.dateFinEffective || null;
+      // Durée accordée (comme pour une demande de stage) — par défaut la durée demandée
+      const dureeAccordee = parseInt(data.dureeAccordee) || renouvellement.dureeDemandee;
 
-    // Auto-calculer seulement si l'admin n'a pas fourni les dates manuellement
-    if (!dateDebutEffectiveNouveau && stageActuelDateFin) {
-      const lendemain = new Date(stageActuelDateFin);
-      lendemain.setDate(lendemain.getDate() + 1);
-      dateDebutEffectiveNouveau = lendemain.toISOString().split('T')[0];
+      // Auto-calculer seulement si l'admin n'a pas fourni les dates manuellement
+      if (!dateDebutEffectiveNouveau && stageActuelDateFin) {
+        const lendemain = new Date(stageActuelDateFin);
+        lendemain.setDate(lendemain.getDate() + 1);
+        dateDebutEffectiveNouveau = lendemain.toISOString().split('T')[0];
+      }
+      if (dateDebutEffectiveNouveau && !dateFinEffectiveNouveau) {
+        dateFinEffectiveNouveau = calculerDateFin(dateDebutEffectiveNouveau, dureeAccordee);
+      }
+
+      const updateData = {
+        statusStage: 'ACCEPTE',
+        dureeStage: dureeAccordee,
+      };
+
+      if (dateDebutEffectiveNouveau) {
+        updateData.dateDebutEffective = dateDebutEffectiveNouveau;
+        updateData.dateFinEffective = dateFinEffectiveNouveau;
+      }
+
+      // Convention jointe (comme createDocumentStage / updateStatusStage) : le stage passe EN_COURS
+      // si sa date de début est atteinte, sinon il reste ACCEPTE et le cron l'activera le jour J.
+      if (file) {
+        await DocumentStage.create({
+          stage_idstage: renouvellement.stageNouveau.idstage,
+          rapport_idrapport: null,
+          agents_idagents: agentContext?.agentId || null,
+          typeDocument: 'CONVENTION',
+          document: Buffer.alloc(0), // fichier sur disque ; colonne NOT NULL tant que la migration n'est pas passée
+          document_path: conventionPath,
+          document_filename: file.originalname,
+          document_size: file.size,
+          dateEmission: dateDebutEffectiveNouveau || new Date().toISOString().split('T')[0],
+          dateExpiration: dateFinEffectiveNouveau,
+        }, { transaction });
+      }
+      updateData.statusStage = statutApresConvention(dateDebutEffectiveNouveau);
+
+      await renouvellement.stageNouveau.update(updateData, { transaction });
+
+    } else if (data.statusRenouvellement === 'REJETE') {
+      await renouvellement.stageNouveau.update({
+        statusStage: 'REJETE',
+        motifRefus: data.motifRefus,
+      }, { transaction });
     }
-    if (dateDebutEffectiveNouveau && !dateFinEffectiveNouveau) {
-      dateFinEffectiveNouveau = calculerDateFin(dateDebutEffectiveNouveau, dureeAccordee);
-    }
 
-    const updateData = {
-      statusStage: 'ACCEPTE',
-      dureeStage: dureeAccordee,
-    };
-
-    if (dateDebutEffectiveNouveau) {
-      updateData.dateDebutEffective = dateDebutEffectiveNouveau;
-      updateData.dateFinEffective = dateFinEffectiveNouveau;
-    }
-
-    await renouvellement.stageNouveau.update(updateData);
-
-    // Si une convention existe déjà dans document_stage pour ce nouveau stage, il passe
-    // EN_COURS seulement si sa date de début est atteinte — sinon il reste ACCEPTE
-    // (le stage actuel est encore en cours) et le cron l'activera le jour J.
-    const conventionExistante = await DocumentStage.findOne({
-      where: {
-        stage_idstage: renouvellement.stageNouveau.idstage,
-        typeDocument: 'CONVENTION',
-        del: 0,
-      },
-    });
-    if (conventionExistante && statutApresConvention(dateDebutEffectiveNouveau) === 'EN_COURS') {
-      await renouvellement.stageNouveau.update({ statusStage: 'EN_COURS' });
-    }
-
-  } else if (data.statusRenouvellement === 'REJETE') {
-    await renouvellement.stageNouveau.update({
-      statusStage: 'REJETE',
-      motifRefus: data.motifRefus,
-    });
+    await transaction.commit();
+  } catch (err) {
+    await transaction.rollback();
+    fileStorage.deleteFile(conventionPath);
+    throw err;
   }
 
   // Notification au candidat selon la décision
