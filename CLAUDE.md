@@ -307,3 +307,17 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
   statistiques Total / En cours / Terminés), onglets Tous / En cours / Rejetés, cartes identiques aux stages
   (bandeau de rejet, pastille de statut, dates), sidebar « Comment ça marche ? », modal de détail au design
   SONABHY (infos, documents, progression) à la place de l'accordéon, modal de re-soumission en rouge SONABHY.
+
+### 2026-10-21 — Travail sur la copie de la base de production
+- La base locale `pares_db` est désormais une **copie de la production** (dump du 2026-10-20). Toute correction
+  de la base = migration `migrations/migration_prod_*.sql`, appliquée ensuite sur le serveur par `npm run migrate`.
+- La production n'avait pas `migration_prod_autorisation_rapport.sql` ni `…_renouvellement_en_traitement.sql` :
+  le serveur tournait sur du code antérieur au 2026-10-17.
+- **Renouvellements invisibles** (ex. NEBIE WEBIBE GERTRUDE) : `demanderRenouvellement` créait le stage enfant puis
+  `renouvellement_stage` sans transaction → stages orphelins (468, 571) invisibles et candidat bloqué
+  (« une demande existe déjà »). Corrigé : transaction + suppression de la lettre en cas d'échec (test ajouté).
+  Données : `migration_prod_renouvellements_orphelins.sql` (direction reprise du parent, documents du parent pour
+  les orphelins, ligne de renouvellement EN_ATTENTE sans lettre, `createdBy = 'Migration renouvellements orphelins'`).
+  **À appliquer en production** avec les deux migrations ci-dessus.
+- Constaté, non corrigé (à décider) : direction 8 sans agent (renouvellement n°10 visible de l'admin seul) ;
+  statut du renouvellement ≠ statut de son stage enfant (n°2 à 7, 10) ; `renouvellement_stage.createdDate` NULL.

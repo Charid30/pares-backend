@@ -10,6 +10,7 @@ const {
   DemandeModificationStage,
   AutorisationRenouvellementStage,
   AutorisationRapportStage,
+  sequelize,
 } = require('../models');
 const { Op } = require('sequelize');
 const emailService = require('./email.service');
@@ -1034,63 +1035,75 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
     }
   }
 
-  // Créer une nouvelle demande de stage comme renouvellement
-  const nouveauStage = await Stage.create({
-    candidats_idcandidats: candidatId,
-    typeStage: stage.typeStage,
-    niveau: stage.niveau,
-    domaineStage: stage.domaineStage,
-    dureeStage: dureeDemandee,
-    dateDebutSouhaitee: dateDebutRenouvellement.toISOString().split('T')[0],
-    statusStage: 'EN_ATTENTE',
-    estRenouvellement: 1,
-    stage_parent_idstage: stageId,
-    // Reconduire la direction et le service d'origine
-    direction_iddirection: directionId,
-    service_idservice: serviceId,
-    // Copier les documents du stage parent (chemin disque + BLOB legacy)
-    cv: stage.cv,
-    cv_path: stage.cv_path,
-    cv_filename: stage.cv_filename,
-    cv_size: stage.cv_size,
-    cnib: stage.cnib,
-    cnib_path: stage.cnib_path,
-    cnib_filename: stage.cnib_filename,
-    cnib_size: stage.cnib_size,
-    casierJudiciaire: stage.casierJudiciaire,
-    casierJudiciaire_path: stage.casierJudiciaire_path,
-    casierJudiciaire_filename: stage.casierJudiciaire_filename,
-    casierJudiciaire_size: stage.casierJudiciaire_size,
-    lettreMotivation: stage.lettreMotivation,
-    lettreMotivation_path: stage.lettreMotivation_path,
-    lettreMotivation_filename: stage.lettreMotivation_filename,
-    lettreMotivation_size: stage.lettreMotivation_size,
-    lettreRecommandation: stage.lettreRecommandation,
-    lettreRecommandation_path: stage.lettreRecommandation_path,
-    lettreRecommandation_filename: stage.lettreRecommandation_filename,
-    lettreRecommandation_size: stage.lettreRecommandation_size,
-  });
+  // Le stage enfant et la ligne renouvellement_stage sont créés dans une même transaction :
+  // sans elle, un échec à la 2e étape laissait un stage orphelin, invisible dans les écrans
+  // Renouvellements et bloquant toute nouvelle demande (« une demande existe déjà »).
+  const lettrePath = fileStorage.saveFile(file.buffer, file.originalname, 'renouvellements');
+  const transaction = await sequelize.transaction();
+  let nouveauStage;
+  try {
+    // Créer une nouvelle demande de stage comme renouvellement
+    nouveauStage = await Stage.create({
+      candidats_idcandidats: candidatId,
+      typeStage: stage.typeStage,
+      niveau: stage.niveau,
+      domaineStage: stage.domaineStage,
+      dureeStage: dureeDemandee,
+      dateDebutSouhaitee: dateDebutRenouvellement.toISOString().split('T')[0],
+      statusStage: 'EN_ATTENTE',
+      estRenouvellement: 1,
+      stage_parent_idstage: stageId,
+      // Reconduire la direction et le service d'origine
+      direction_iddirection: directionId,
+      service_idservice: serviceId,
+      // Copier les documents du stage parent (chemin disque + BLOB legacy)
+      cv: stage.cv,
+      cv_path: stage.cv_path,
+      cv_filename: stage.cv_filename,
+      cv_size: stage.cv_size,
+      cnib: stage.cnib,
+      cnib_path: stage.cnib_path,
+      cnib_filename: stage.cnib_filename,
+      cnib_size: stage.cnib_size,
+      casierJudiciaire: stage.casierJudiciaire,
+      casierJudiciaire_path: stage.casierJudiciaire_path,
+      casierJudiciaire_filename: stage.casierJudiciaire_filename,
+      casierJudiciaire_size: stage.casierJudiciaire_size,
+      lettreMotivation: stage.lettreMotivation,
+      lettreMotivation_path: stage.lettreMotivation_path,
+      lettreMotivation_filename: stage.lettreMotivation_filename,
+      lettreMotivation_size: stage.lettreMotivation_size,
+      lettreRecommandation: stage.lettreRecommandation,
+      lettreRecommandation_path: stage.lettreRecommandation_path,
+      lettreRecommandation_filename: stage.lettreRecommandation_filename,
+      lettreRecommandation_size: stage.lettreRecommandation_size,
+    }, { transaction });
 
-  // Créer l'entrée dans renouvellement_stage avec la lettre du candidat.
-  // La convention du renouvellement est jointe plus tard par l'agent/admin (document_stage).
-  const renouvellementCreated = await RenouvellementStage.create({
-    stage_actuel_idstage: stageId,
-    stage_nouveau_idstage: nouveauStage.idstage,
-    lettreMotivationRenouvellement: null,
-    lettreMotivationRenouvellement_path: fileStorage.saveFile(file.buffer, file.originalname, 'renouvellements'),
-    lettreMotivationRenouvellement_filename: file.originalname,
-    lettreMotivationRenouvellement_size: file.size,
-    dureeDemandee: dureeDemandee,
-    statusRenouvellement: 'EN_ATTENTE',
-  });
+    // Créer l'entrée dans renouvellement_stage avec la lettre du candidat.
+    // La convention du renouvellement est jointe plus tard par l'agent/admin (document_stage).
+    await RenouvellementStage.create({
+      stage_actuel_idstage: stageId,
+      stage_nouveau_idstage: nouveauStage.idstage,
+      lettreMotivationRenouvellement: null,
+      lettreMotivationRenouvellement_path: lettrePath,
+      lettreMotivationRenouvellement_filename: file.originalname,
+      lettreMotivationRenouvellement_size: file.size,
+      dureeDemandee: dureeDemandee,
+      statusRenouvellement: 'EN_ATTENTE',
+      createdBy: 'Candidat',
+    }, { transaction });
 
+    // Consommer l'autorisation si le stage était TERMINE/EXPIRE
+    if (autorisationActive) {
+      await autorisationActive.update({ usedAt: new Date() }, { transaction });
+    }
 
-  // Consommer l'autorisation si le stage était TERMINE/EXPIRE
-  if (autorisationActive) {
-    await autorisationActive.update({ usedAt: new Date() });
+    await transaction.commit();
+  } catch (err) {
+    await transaction.rollback();
+    fileStorage.deleteFile(lettrePath);
+    throw err;
   }
-
-  await renouvellementCreated.update({ createdBy: 'Candidat' });
 
   return {
     idstage: nouveauStage.idstage,

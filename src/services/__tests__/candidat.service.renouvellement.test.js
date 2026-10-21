@@ -3,6 +3,7 @@
 // demandée (pas seulement à la chaîne déjà terminée comme dans soumettreDemandeStage).
 jest.mock('../../utils/fileStorage.util', () => ({
   saveFile: jest.fn(() => 'uploads/renouvellements/fake-path.pdf'),
+  deleteFile: jest.fn(),
 }));
 
 const { resetDb } = require('../../__tests__/helpers/testDb');
@@ -122,6 +123,28 @@ describe('demanderRenouvellement', () => {
     );
 
     expect(result.dateDebutSouhaitee).toBe(isoDansNJours(6)); // lendemain de la fin
+  });
+
+  test('un échec à la création du renouvellement ne laisse pas de stage orphelin', async () => {
+    const fileStorage = require('../../utils/fileStorage.util');
+    const candidat = await creerCandidat();
+    const { direction, service } = await creerDirectionEtService();
+    const stage = await creerStageEnCours(candidat.idcandidats, direction, service, {
+      dateFinEffective: isoDansNJours(5),
+    });
+    const spy = jest.spyOn(RenouvellementStage, 'create').mockRejectedValueOnce(new Error('échec BD'));
+
+    await expect(
+      candidatService.demanderRenouvellement(candidat.idcandidats, stage.idstage, { dureeDemandee: 1 }, fauxFichier)
+    ).rejects.toThrow('échec BD');
+    spy.mockRestore();
+
+    expect(await Stage.count({ where: { stage_parent_idstage: stage.idstage } })).toBe(0);
+    expect(fileStorage.deleteFile).toHaveBeenCalledWith('uploads/renouvellements/fake-path.pdf');
+
+    // Le candidat peut refaire sa demande
+    await candidatService.demanderRenouvellement(candidat.idcandidats, stage.idstage, { dureeDemandee: 1 }, fauxFichier);
+    expect(await RenouvellementStage.count({ where: { stage_actuel_idstage: stage.idstage } })).toBe(1);
   });
 
   test('refuse sans lettre de demande', async () => {
