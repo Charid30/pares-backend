@@ -170,3 +170,34 @@ describe('updateStatusStage — un agent ne peut pas rejeter un stage hors de sa
     expect(updated.statusStage).toBe('REJETE');
   });
 });
+
+describe('circuit de la demande de stage (approbation, refus avant convention)', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  test('approuverStage accepte une demande « En traitement » (mise en traitement automatique)', async () => {
+    const direction = await Direction.create({ nom: 'Direction A', accronyme: 'DA' });
+    const candidat = await creerCandidat();
+    const stage = await creerStageEnAttente(candidat.idcandidats, direction.iddirection);
+    await stage.update({ statusStage: 'EN_COURS_DE_TRAITEMENT' });
+
+    const approuve = await stageService.approuverStage(stage.idstage, 'agent', { isSystemRole: true });
+    expect(approuve.statusStage).toBe('PROGRAMMATION_EN_COURS');
+  });
+
+  test('le refus reste possible en cours de programmation, mais plus une fois la convention jointe', async () => {
+    const direction = await Direction.create({ nom: 'Direction A', accronyme: 'DA' });
+    const candidat = await creerCandidat();
+    const programme = await creerStageEnAttente(candidat.idcandidats, direction.iddirection);
+    await programme.update({ statusStage: 'PROGRAMMATION_EN_COURS' });
+    const refuse = await stageService.updateStatusStage(programme.idstage, { statusStage: 'REJETE', motifRefus: 'Doublon' }, null, null, { isSystemRole: true });
+    expect(refuse.statusStage).toBe('REJETE');
+
+    const valide = await creerStageEnAttente(candidat.idcandidats, direction.iddirection);
+    await valide.update({ statusStage: 'ACCEPTE' });
+    await expect(
+      stageService.updateStatusStage(valide.idstage, { statusStage: 'REJETE', motifRefus: 'Trop tard' }, null, null, { isSystemRole: true })
+    ).rejects.toThrow('ne peut plus être refusée');
+  });
+});

@@ -16,6 +16,21 @@ const {
 const { Op, literal } = require('sequelize');
 const emailService = require('./email.service');
 const notifService = require('./notification.service');
+const inappService = require('./inapp.service');
+
+/**
+ * Notification in-app + push au candidat, indépendante de l'e-mail : un échec SMTP ne doit pas
+ * priver le candidat de la notification dans l'application. Jamais bloquante.
+ */
+const notifierCandidat = (candidatId, type, titre, message) => {
+  if (!candidatId) return Promise.resolve();
+  const link = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/dashboard/candidat/mes-stages`;
+  return inappService.push({ recipientType: 'CANDIDAT', recipientId: candidatId, type, titre, message, link })
+    .catch(e => console.error('❌ Notification candidat:', e.message));
+};
+
+// Avant la convention, une demande de stage peut encore être refusée
+const STATUTS_AVANT_CONVENTION = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'];
 const { getAgentDirectionIds } = require('../utils/agentDirections.util');
 const fileStorage = require('../utils/fileStorage.util');
 const { calculerDateFin, calculerPeutAgir, calculerDureeEtRepos } = require('../utils/stageCalculs.util');
@@ -347,11 +362,12 @@ const getAllStages = async (filters = {}, agentContext = null) => {
   delete whereStats.statusStage;
 
   // Chaque compteur correspond exactement à une section du menu Vue globale :
-  // En attente = EN_ATTENTE, Approuvé = PROGRAMMATION_EN_COURS,
+  // À approuver = EN_ATTENTE + EN_COURS_DE_TRAITEMENT (mise en traitement automatique),
+  // En cours de programmation = PROGRAMMATION_EN_COURS,
   // En cours = ACCEPTE + EN_COURS, Terminé = RAPPORT_SOUMIS + TERMINE
   const [total, enAttente, accepte, enCours, termine, rejete] = await Promise.all([
     Stage.count({ where: whereStats }),
-    Stage.count({ where: { ...whereStats, statusStage: 'EN_ATTENTE' } }),
+    Stage.count({ where: { ...whereStats, statusStage: { [Op.in]: ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT'] } } }),
     Stage.count({ where: { ...whereStats, statusStage: 'PROGRAMMATION_EN_COURS' } }),
     Stage.count({ where: { ...whereStats, statusStage: { [Op.in]: ['ACCEPTE', 'EN_COURS'] } } }),
     Stage.count({ where: { ...whereStats, statusStage: { [Op.in]: ['RAPPORT_SOUMIS', 'TERMINE'] } } }),
@@ -761,6 +777,11 @@ const updateStatusStage = async (id, data, file = null, agentId = null, agentCon
 
   await assertAgentOwnsDirection(agentContext, stage.direction_iddirection);
 
+  // Une demande ne peut plus être refusée une fois sa convention jointe (stage validé)
+  if (data.statusStage === 'REJETE' && !STATUTS_AVANT_CONVENTION.includes(stage.statusStage)) {
+    throw new Error(`Cette demande ne peut plus être refusée : sa convention est déjà jointe (statut actuel : ${stage.statusStage})`);
+  }
+
   // Documents non conformes (uniquement pertinent en cas de rejet) — converti en JSON pour stockage
   if (data.statusStage === 'REJETE') {
     const keys = (data.documentsRejetes || '')
@@ -822,6 +843,17 @@ const updateStatusStage = async (id, data, file = null, agentId = null, agentCon
     await activerStagesAcceptes();
     await expirerStagesEnCours();
     await stage.reload();
+  }
+
+  // Notification in-app + push (le statut final dépend de la date de début : ACCEPTE ou EN_COURS)
+  if (data.statusStage === 'ACCEPTE') {
+    notifierCandidat(stage.candidats_idcandidats, 'STAGE_ACCEPTE', 'Demande de stage acceptée ✓',
+      stage.statusStage === 'EN_COURS'
+        ? `Votre convention de stage (${stage.domaineStage}) est jointe : votre stage est en cours.`
+        : `Votre convention de stage (${stage.domaineStage}) est jointe : votre stage commence bientôt.`);
+  } else if (data.statusStage === 'REJETE') {
+    notifierCandidat(stage.candidats_idcandidats, 'STAGE_REJETE', 'Demande de stage refusée',
+      `Votre demande de stage (${stage.domaineStage}) n'a pas été retenue.${data.motifRefus ? ` Motif : ${data.motifRefus}` : ''}`);
   }
 
   // Envoyer l'email de notification au candidat — en arrière-plan
@@ -1412,7 +1444,7 @@ const approuverRenouvellement = async (id, agentContext = null) => {
         recipientType: 'CANDIDAT', recipientId: candidat.idcandidats,
         type: 'RENOUVELLEMENT_APPROUVE',
         titre: 'Renouvellement approuvé ✓',
-        message: 'Votre demande de renouvellement a été approuvée et est en attente de validation finale.',
+        message: 'Votre demande de renouvellement a été approuvée : elle est en cours de programmation.',
         link: urlSuivi,
       });
     }
@@ -1984,6 +2016,9 @@ const evaluateRapport = async (id, data, evaluePar, agentContext = null) => {
       lastmodifiedDate: new Date(),
     });
 
+    notifierCandidat(rapport.stage.candidat?.idcandidats, 'RAPPORT_VALIDE', 'Rapport de stage validé ✓',
+      `Votre rapport « ${rapport.titreRapport} » a été validé.`);
+
     // Envoyer email de notification au candidat — en arrière-plan
     if (rapport.stage.candidat) {
       (async () => {
@@ -2095,6 +2130,11 @@ const createDocumentStage = async (agentId, data, file) => {
   if (data.typeDocument === 'CONVENTION' && stage.statusStage === 'ACCEPTE'
       && statutApresConvention(stage.dateDebutEffective) === 'EN_COURS') {
     await stage.update({ statusStage: 'EN_COURS' });
+  }
+
+  if (data.typeDocument === 'ATTESTATION') {
+    notifierCandidat(stage.candidats_idcandidats, 'ATTESTATION_DISPONIBLE', 'Attestation de stage disponible',
+      'Votre attestation de stage est disponible : vous pouvez la télécharger depuis « Mes stages ».');
   }
 
   // Envoyer email de notification si c'est une attestation — en arrière-plan
@@ -2692,7 +2732,8 @@ const approuverStage = async (stageId, agentUsername, agentContext = null, dateD
 
   await assertAgentOwnsDirection(agentContext, stage.direction_iddirection);
 
-  if (stage.statusStage !== 'EN_ATTENTE') {
+  // La demande passe automatiquement « En traitement » une heure après son dépôt (stageStatusJob)
+  if (!['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT'].includes(stage.statusStage)) {
     throw new Error(`Le stage ne peut pas être approuvé (statut actuel : ${stage.statusStage})`);
   }
 
@@ -2702,6 +2743,9 @@ const approuverStage = async (stageId, agentUsername, agentContext = null, dateD
     nomMaitreStage: nomMaitreStage || null,
     lastmodifiedDate: new Date(),
   });
+
+  notifierCandidat(stage.candidats_idcandidats, 'STAGE_APPROUVE', 'Demande de stage approuvée ✓',
+    `Votre demande de stage (${stage.domaineStage}) est approuvée : elle est en cours de programmation.`);
 
   return stage.reload();
 };

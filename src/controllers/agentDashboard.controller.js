@@ -132,10 +132,11 @@ const construireDashboard = async (user) => {
 
   // ── Stages et renouvellements (module STAGE) ─────────────────────────────
   if (moduleStage && peut('STAGE', 'APPROUVER')) {
+    // En attente ou déjà mises en traitement (automatique une heure après le dépôt)
     await ajouter({
       cle: 'STAGES_A_APPROUVER', module: 'STAGE', action: 'APPROUVER',
       label: 'Demandes de stage à approuver', route: '/dashboard/agent/stages',
-    }, Stage, { ...stageWhere, stage_parent_idstage: null, statusStage: 'EN_ATTENTE' });
+    }, Stage, { ...stageWhere, stage_parent_idstage: null, statusStage: { [Op.in]: ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT'] } });
   }
   if (moduleStage && peut('STAGE', 'VALIDER')) {
     await ajouter({

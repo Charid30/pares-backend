@@ -126,8 +126,21 @@ pares-frontend/src/features/dashboard/
 
 ## Règles métier : stage
 
-- Circuit demande de stage : EN_ATTENTE → (Traiter) EN_COURS_DE_TRAITEMENT → (Approuver, agent) PROGRAMMATION_EN_COURS
-  → (Accepter + convention) ACCEPTE / EN_COURS → EXPIRE → rapport → TERMINE. Refus possible avant décision.
+- Circuit demande de stage (validé le 2026-10-21) :
+  1. **En attente** au dépôt (toutes les pièces sont exigées au dépôt).
+  2. **En traitement** : automatique **une heure après** le dépôt ou la re-soumission (`stageStatusJob.mettreEnTraitementDemandes`,
+     stages racines uniquement) — plus de bouton « Traiter ».
+  3. **Approuver** (agent APPROUVER de la direction, depuis En attente ou En traitement, avec une date proposée)
+     → **En cours de programmation** (`PROGRAMMATION_EN_COURS` ; libellé unique partout, plus « Approuvé »).
+  4. **Convention** jointe par les **agents RH** (permission VALIDER ; rôle à lecture globale, ex. SOUS_ADMIN RH /
+     Christine) — ils peuvent fixer la date de début → **En cours** si la date est arrivée, sinon **Accepté**, avec le
+     message au candidat « Votre stage commence dans X jours ». Les approbateurs ne joignent pas de convention.
+  5. EXPIRE → rapport → TERMINE.
+  - **Refus** (motif + pièces non conformes) possible **tant que la convention n'est pas jointe** (bloqué ensuite côté serveur).
+  - L'admin garde le raccourci : accepter directement avec la convention.
+  - Notifications au candidat (in-app + push) à chaque étape ; **relance des agents** (`stageRelanceJob`) : demandes
+    bloquées depuis 7 jours en traitement (approbateurs) ou en programmation (RH), au plus une fois par semaine,
+    e-mail + push.
 - **Un stage n'est validé que lorsque sa convention est jointe.** Statut après convention :
   **ACCEPTE** si la date de début n'est pas arrivée, **EN_COURS** si elle l'est (`statutApresConvention`).
   Le job n'active (ACCEPTE → EN_COURS) **que les stages ayant une convention**.
@@ -351,3 +364,16 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
   aucun rôle de production n'a STAGE/CREER, les agents acceptaient donc sans convention). Transaction : convention,
   renouvellement et stage écrits ensemble, fichier supprimé en cas d'échec. Convention de SERE (stage 156) vérifiée :
   c'est celle de la demande de stage (01/04 → 30/06), aucune convention de renouvellement n'a été jointe.
+- **Nouveau circuit de la demande de stage** (voir « Règles métier : stage ») : passage automatique « En traitement »,
+  bouton « Traiter » retiré (écran Stages admin), approbation depuis « En traitement », refus bloqué après convention,
+  libellé « En cours de programmation », message « Votre stage commence dans X jours », notifications push au
+  candidat (traitement, approbation, acceptation, refus, début, fin + rappel du rapport, rapport validé, attestation,
+  renouvellement), relance hebdomadaire des agents (`stageRelanceJob`). NAMOANO (renouvellement n°8) remis
+  « En attente » (`migration_prod_namoano_renouvellement_en_attente.sql`).
+- **Déploiement — ordre impératif** : `git pull` → `npm run migrate` → redémarrage. La migration
+  `migration_prod_stages_en_traitement_initial.sql` passe les ~338 demandes déjà en attente « En traitement » **sans
+  notification** ; si le serveur redémarre avant, le job notifie tous ces candidats d'un coup. Au premier jour, la
+  relance partira vers les agents RH pour les demandes « En cours de programmation » de plus de 7 jours (71 sur la copie).
+- **Incident (poste de dev)** : le `nodemon` local, branché sur la copie de prod, a rechargé le nouveau job pendant son
+  écriture → 338 demandes passées « En traitement » dans `pares_db` local, notifications push probablement reçues par
+  98 candidats et 2 agents, relance de 3 agents (e-mail incertain). Arrêter tout serveur local avant de modifier un job.
