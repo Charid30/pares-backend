@@ -1090,6 +1090,7 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
       lettreMotivationRenouvellement_size: file.size,
       dureeDemandee: dureeDemandee,
       statusRenouvellement: 'EN_ATTENTE',
+      dateEnAttente: new Date(), // début du délai de 48 h avant approbation automatique
       createdBy: 'Candidat',
     }, { transaction });
 

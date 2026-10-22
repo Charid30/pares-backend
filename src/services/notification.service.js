@@ -1,6 +1,6 @@
 // src/services/notification.service.js
 // Service centralisé : notifications email + in-app (agents + candidats)
-const { AgentNotificationPref, Agent, Candidat, User, Role } = require('../models');
+const { AgentNotificationPref, Agent, Candidat, User, Role, Permission } = require('../models');
 const emailService = require('./email.service');
 const inapp = require('./inapp.service');
 
@@ -532,8 +532,103 @@ const broadcastCandidatsWithInApp = async (subject, html, inappPayload) => {
   }
 };
 
+// =====================================================
+// RENOUVELLEMENTS À PROGRAMMER → AGENTS RH
+// =====================================================
+
+/**
+ * Agents RH : agents actifs dont un rôle « lecture globale » a RENOUVELLEMENT/VALIDER — ils joignent
+ * les conventions des renouvellements de toutes les directions (ex. SOUS_ADMIN RH). L'administration
+ * n'est pas visée ; un agent qui a désactivé les notifications STAGE n'est pas prévenu.
+ */
+const agentsRHRenouvellement = async () => {
+  const roles = await Role.findAll({
+    where: { del: 0, lectureGlobale: 1 },
+    attributes: ['idrole'],
+    include: [{
+      model: Permission, as: 'permissions', attributes: [], required: true,
+      where: { module: 'RENOUVELLEMENT', action: 'VALIDER', del: 0 },
+    }],
+  });
+  const rolesRH = new Set(roles.map(r => r.idrole));
+  if (rolesRH.size === 0) return [];
+
+  const [agents, desactives] = await Promise.all([
+    Agent.findAll({
+      where: { del: 0, actif: 1 },
+      attributes: ['idagents', 'email', 'nom', 'prenom'],
+      include: [{
+        model: User, as: 'users', attributes: ['idusers', 'role_idrole'], through: { attributes: [] },
+        include: [
+          { model: Role, as: 'role', attributes: ['accronyme'] },
+          { model: Role, as: 'additionalRoles', attributes: ['idrole', 'accronyme'], through: { attributes: [] } },
+        ],
+      }],
+    }),
+    AgentNotificationPref.findAll({ where: { notificationType: 'STAGE', enabled: 0 }, attributes: ['agent_idagents'] }),
+  ]);
+  const exclus = new Set(desactives.map(p => p.agent_idagents));
+
+  return agents.filter((agent) => {
+    if (exclus.has(agent.idagents)) return false;
+    const users = agent.users || [];
+    const estAdmin = users.some(u => u.role?.accronyme === 'ADMIN' || (u.additionalRoles || []).some(r => r.accronyme === 'ADMIN'));
+    const estRH = users.some(u => rolesRH.has(u.role_idrole) || (u.additionalRoles || []).some(r => rolesRH.has(r.idrole)));
+    return estRH && !estAdmin;
+  });
+};
+
+/**
+ * Prévenir les agents RH (e-mail + in-app, qui déclenche le push) que des renouvellements sont
+ * « En cours de programmation » : convention à joindre.
+ * @param {{ candidat: string, dureeDemandee: number }[]} renouvellements
+ * @param {boolean} automatique - approuvés automatiquement après 48 h sans action de la direction
+ */
+const onRenouvellementsAProgrammer = async (renouvellements, automatique = false) => {
+  if (!renouvellements.length) return;
+  try {
+    const agents = await agentsRHRenouvellement();
+    if (!agents.length) return;
+    const lien = `${FRONTEND}/dashboard/agent/renouvellements-global/programmation`;
+    const nb = renouvellements.length;
+    const origine = automatique
+      ? 'approuvée(s) automatiquement après 48 h sans action de la direction'
+      : 'approuvée(s) par la direction';
+    const lignes = renouvellements
+      .map(r => `<p><strong>${r.candidat}</strong> — ${r.dureeDemandee} mois demandé(s)</p>`)
+      .join('');
+    const html = emailService.buildBaseTemplate(`
+      <p class="greeting">Renouvellement(s) de stage à programmer</p>
+      <p class="message">${nb} demande(s) de renouvellement ${origine} attend(ent) la convention de stage.</p>
+      <div class="info-box">${lignes}</div>
+      <div style="text-align:center;"><a href="${lien}" class="button">Joindre les conventions</a></div>
+    `, 'Renouvellements à programmer');
+
+    for (const agent of agents) {
+      if (agent.email) {
+        try {
+          await emailService.sendEmail({ to: agent.email, subject: `${nb} renouvellement(s) de stage à programmer`, html });
+        } catch (e) {
+          console.error('❌ E-mail RH renouvellement:', e.message);
+        }
+      }
+      await inapp.push({
+        recipientType: 'AGENT',
+        recipientId: agent.idagents,
+        type: 'RENOUVELLEMENT_A_PROGRAMMER',
+        titre: 'Renouvellement(s) à programmer',
+        message: `${nb} renouvellement(s) de stage ${origine} : convention à joindre.`,
+        link: lien,
+      });
+    }
+  } catch (err) {
+    console.error('❌ Erreur onRenouvellementsAProgrammer:', err.message);
+  }
+};
+
 module.exports = {
   notifyAgents,
+  onRenouvellementsAProgrammer,
   notifyAdmins,
   initAgentNotificationPrefs,
   sendConfirmationSoumission,

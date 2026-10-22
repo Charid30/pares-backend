@@ -38,6 +38,11 @@ module.exports = (sequelize) => {
       type: DataTypes.ENUM('EN_ATTENTE', 'PROGRAMMATION_EN_COURS', 'ACCEPTE', 'REJETE', 'EN_COURS', 'EXPIRE', 'TERMINE', 'RAPPORT_SOUMIS', 'EN_COURS_DE_TRAITEMENT'),
       defaultValue: 'EN_ATTENTE',
     },
+    dateEnAttente: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: 'Début du délai de 48 h avant approbation automatique',
+    },
     motifRefus: {
       type: DataTypes.TEXT,
     },

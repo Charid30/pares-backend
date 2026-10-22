@@ -295,17 +295,6 @@ router.get(
 );
 
 /**
- * @route   PUT /api/stages/renouvellements/:id/traiter
- * @desc    Mettre un renouvellement en traitement (EN_ATTENTE → EN_COURS_DE_TRAITEMENT) — admin
- */
-router.put(
-  '/renouvellements/:id/traiter',
-  authenticate,
-  authorize(['ADMIN']),
-  stageController.mettreEnTraitementRenouvellement
-);
-
-/**
  * @route   PUT /api/stages/renouvellements/:id/approuver
  * @desc    Approuver une demande de renouvellement (admin ou agent — EN_ATTENTE / EN_COURS_DE_TRAITEMENT → PROGRAMMATION_EN_COURS)
  * @access  Private — permission APPROUVER sur RENOUVELLEMENT requise

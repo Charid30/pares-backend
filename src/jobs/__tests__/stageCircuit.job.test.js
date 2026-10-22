@@ -1,19 +1,22 @@
 // Test d'intégration : circuit automatique d'une demande de stage.
 //  - mise en traitement automatique une heure après le dépôt (stageStatusJob) ;
-//  - relance hebdomadaire des agents sur les demandes bloquées (stageRelanceJob).
+//  - relance hebdomadaire des agents sur les demandes bloquées (stageRelanceJob) ;
+//  - approbation automatique d'un renouvellement après 48 h sans action (stageStatusJob).
 // E-mails et push navigateur simulés : les notifications in-app sont réellement écrites
 // (elles servent de trace « déjà relancé »).
 jest.mock('../../services/email.service');
 jest.mock('../../services/push.service');
+// Création de comptes avec mot de passe (hachage) : plus lente que la limite par défaut de 5 s
+jest.setTimeout(30000);
 
 const { resetDb } = require('../../__tests__/helpers/testDb');
 const { creerCandidat } = require('../../__tests__/helpers/fixtures');
 const {
-  Direction, Stage, Agent, User, Role, Permission, UserAgent, Notification,
+  Direction, Stage, Agent, User, Role, Permission, UserAgent, Notification, RenouvellementStage,
 } = require('../../models');
 const emailService = require('../../services/email.service');
 const pushService = require('../../services/push.service');
-const { mettreEnTraitementDemandes } = require('../stageStatusJob');
+const { mettreEnTraitementDemandes, approuverRenouvellementsAutomatiquement } = require('../stageStatusJob');
 const { runStageRelanceJob } = require('../stageRelanceJob');
 
 const HEURE_MS = 60 * 60 * 1000;
@@ -34,10 +37,10 @@ const creerStage = async (direction, overrides = {}) => {
   });
 };
 
-/** Agent rattaché à une direction, avec un compte et un rôle portant les permissions STAGE données. */
-const creerAgentAvecRole = async (direction, actions, { lectureGlobale = 0 } = {}) => {
+/** Agent rattaché à une direction, avec un compte et un rôle portant les permissions données (module STAGE par défaut). */
+const creerAgentAvecRole = async (direction, actions, { lectureGlobale = 0, module = 'STAGE' } = {}) => {
   const role = await Role.create({ accronyme: `ROLE-${Math.random()}`, description: 'Rôle test', lectureGlobale });
-  for (const action of actions) await Permission.create({ role_idrole: role.idrole, module: 'STAGE', action });
+  for (const action of actions) await Permission.create({ role_idrole: role.idrole, module, action });
   const user = await User.create({ username: `agent.${Math.random()}`, password: 'motdepasse', role_idrole: role.idrole });
   const agent = await Agent.create({
     direction_iddirection: direction.iddirection,
@@ -110,5 +113,43 @@ describe('runStageRelanceJob (demandes bloquées depuis plus de 7 jours)', () =>
 
     // Deuxième passage dans la semaine : pas de nouvelle relance
     expect(await runStageRelanceJob()).toBe(0);
+  });
+});
+
+describe('approuverRenouvellementsAutomatiquement (48 h sans action de la direction)', () => {
+  beforeEach(async () => {
+    await resetDb();
+    emailService.sendEmail.mockClear();
+    emailService.buildBaseTemplate.mockImplementation((html) => html);
+    pushService.sendPushToUser.mockResolvedValue();
+  });
+
+  const creerRenouvellement = async (direction, dateEnAttente) => {
+    const actuel = await creerStage(direction, { statusStage: 'EN_COURS' });
+    const nouveau = await creerStage(direction, { stage_parent_idstage: actuel.idstage });
+    return RenouvellementStage.create({
+      stage_actuel_idstage: actuel.idstage, stage_nouveau_idstage: nouveau.idstage,
+      dureeDemandee: 2, statusRenouvellement: 'EN_ATTENTE', dateEnAttente,
+    });
+  };
+
+  test('approuve après 48 h, notifie le candidat et la RH ; une demande plus récente attend', async () => {
+    const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
+    const ancien = await creerRenouvellement(direction, ilYa(49 * HEURE_MS));
+    const recent = await creerRenouvellement(direction, ilYa(47 * HEURE_MS));
+    const rh = await creerAgentAvecRole(direction, ['CONSULTER', 'VALIDER'], { lectureGlobale: 1, module: 'RENOUVELLEMENT' });
+    const approbateur = await creerAgentAvecRole(direction, ['CONSULTER', 'APPROUVER'], { module: 'RENOUVELLEMENT' });
+
+    expect(await approuverRenouvellementsAutomatiquement()).toBe(1);
+
+    await ancien.reload();
+    await recent.reload();
+    expect(ancien.statusRenouvellement).toBe('PROGRAMMATION_EN_COURS');
+    expect(ancien.lastModifiedBy).toMatch(/approbation automatique/);
+    expect(recent.statusRenouvellement).toBe('EN_ATTENTE');
+    expect(await Notification.count({ where: { recipient_type: 'CANDIDAT', type: 'RENOUVELLEMENT_APPROUVE' } })).toBe(1);
+    expect(await Notification.count({ where: { recipient_type: 'AGENT', recipient_id: rh.idagents, type: 'RENOUVELLEMENT_A_PROGRAMMER' } })).toBe(1);
+    expect(await Notification.count({ where: { recipient_type: 'AGENT', recipient_id: approbateur.idagents } })).toBe(0);
+    expect(emailService.sendEmail).toHaveBeenCalledTimes(1); // seul l'agent RH
   });
 });

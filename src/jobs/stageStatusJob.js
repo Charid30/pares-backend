@@ -4,6 +4,7 @@ const { Stage, RenouvellementStage, Candidat, DocumentStage } = require('../mode
 const { Op } = require('sequelize');
 const emailService = require('../services/email.service');
 const inapp = require('../services/inapp.service');
+const notifService = require('../services/notification.service');
 
 const FRONTEND = process.env.FRONTEND_URL || 'http://localhost:4200';
 const LIEN_MES_STAGES = `${FRONTEND}/dashboard/candidat/mes-stages`;
@@ -57,6 +58,66 @@ const mettreEnTraitementDemandes = async () => {
     return count;
   } catch (error) {
     console.error('[CRON] Erreur mise en traitement:', error.message);
+    throw error;
+  }
+};
+
+// Délai sans action de la direction avant l'approbation automatique d'un renouvellement
+const DELAI_APPROBATION_AUTO_RENOUVELLEMENT_MS = 48 * 60 * 60 * 1000; // 48 h, week-end compris
+
+/**
+ * Approuve automatiquement (EN_ATTENTE → PROGRAMMATION_EN_COURS) les demandes de renouvellement
+ * restées 48 h sans évolution : les agents RH peuvent alors joindre la convention. Le délai part de
+ * dateEnAttente (soumission, re-soumission, réouverture, annulation de l'approbation).
+ */
+const approuverRenouvellementsAutomatiquement = async () => {
+  const limite = new Date(Date.now() - DELAI_APPROBATION_AUTO_RENOUVELLEMENT_MS);
+
+  try {
+    const aApprouver = await RenouvellementStage.findAll({
+      attributes: ['idrenouvellement', 'dureeDemandee'],
+      where: {
+        statusRenouvellement: 'EN_ATTENTE',
+        del: 0,
+        [Op.or]: [
+          { dateEnAttente: { [Op.lte]: limite } },
+          { dateEnAttente: null, dateRenouvellement: { [Op.lte]: limite } },
+        ],
+      },
+      include: [{
+        model: Stage,
+        as: 'stageNouveau',
+        attributes: ['idstage'],
+        include: [{ model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom'] }],
+      }],
+    });
+    if (aApprouver.length === 0) return 0;
+
+    const [count] = await RenouvellementStage.update(
+      {
+        statusRenouvellement: 'PROGRAMMATION_EN_COURS',
+        lastModifiedBy: 'Système (approbation automatique après 48 h)',
+        lastModifiedDate: new Date(),
+      },
+      { where: { idrenouvellement: { [Op.in]: aApprouver.map(r => r.idrenouvellement) }, statusRenouvellement: 'EN_ATTENTE' } }
+    );
+
+    for (const r of aApprouver) {
+      await notifierCandidat(r.stageNouveau?.candidat?.idcandidats, 'RENOUVELLEMENT_APPROUVE', 'Renouvellement approuvé ✓',
+        'Votre demande de renouvellement est approuvée : elle est en cours de programmation.');
+    }
+    // Un seul envoi groupé aux agents RH
+    await notifService.onRenouvellementsAProgrammer(aApprouver.map(r => ({
+      candidat: r.stageNouveau?.candidat ? `${r.stageNouveau.candidat.prenom} ${r.stageNouveau.candidat.nom}` : `Renouvellement n°${r.idrenouvellement}`,
+      dureeDemandee: r.dureeDemandee,
+    })), true);
+
+    if (count > 0) {
+      console.log(`[CRON] ${count} renouvellement(s) approuvé(s) automatiquement`);
+    }
+    return count;
+  } catch (error) {
+    console.error('[CRON] Erreur approbation automatique des renouvellements:', error.message);
     throw error;
   }
 };
@@ -270,13 +331,14 @@ const updateAllStageStatuses = async () => {
 
   try {
     const enTraitement = await mettreEnTraitementDemandes();
+    const renouvellementsApprouves = await approuverRenouvellementsAutomatiquement();
     const activated = await activerStagesAcceptes();
     const expired = await expirerStagesEnCours();
     const synced = await syncRenouvellementStatuses();
 
-    console.log(`[CRON] Terminé - ${enTraitement} en traitement, ${activated} active(s), ${expired} expire(s), ${synced} renouvellement(s) sync`);
+    console.log(`[CRON] Terminé - ${enTraitement} en traitement, ${renouvellementsApprouves} renouvellement(s) approuvé(s), ${activated} active(s), ${expired} expire(s), ${synced} renouvellement(s) sync`);
 
-    return { enTraitement, activated, expired, synced };
+    return { enTraitement, renouvellementsApprouves, activated, expired, synced };
   } catch (error) {
     console.error('[CRON] Erreur mise a jour statuts:', error.message);
     throw error;
@@ -285,6 +347,7 @@ const updateAllStageStatuses = async () => {
 
 module.exports = {
   mettreEnTraitementDemandes,
+  approuverRenouvellementsAutomatiquement,
   activerStagesAcceptes,
   expirerStagesEnCours,
   syncRenouvellementStatuses,

@@ -500,28 +500,6 @@ const downloadConventionDemandeRenouvellement = async (req, res) => {
   }
 };
 
-/**
- * Mettre un renouvellement en traitement (bouton « Traiter » — admin)
- * PUT /api/stages/renouvellements/:id/traiter
- */
-const mettreEnTraitementRenouvellement = async (req, res) => {
-  try {
-    const result = await stageService.mettreEnTraitementRenouvellement(req.params.id, getAgentContext(req.user));
-    await auditService.log({
-      agentId:  req.user.agentId,
-      agentNom: req.user.username,
-      action:   'RENOUVELLEMENT_EN_TRAITEMENT',
-      module:   'STAGE',
-      entityId: parseInt(req.params.id),
-      details:  { objet: 'Mise en traitement de la demande de renouvellement' },
-      ip: req.ip,
-    });
-    return success(res, result, 'Renouvellement mis en traitement');
-  } catch (err) {
-    return error(res, err.message, 400);
-  }
-};
-
 // =====================================================
 // RAPPORTS
 // =====================================================
@@ -1340,7 +1318,6 @@ module.exports = {
   deleteStage,
   hardDeleteStage,
   rouvrirRenouvellement,
-  mettreEnTraitementRenouvellement,
   downloadConventionDemandeRenouvellement,
   expirerRenouvellement,
   annulerApprobationRenouvellement,

@@ -174,12 +174,22 @@ pares-frontend/src/features/dashboard/
   la convention ; « Approuver » se fait depuis le détail.
   Les anciennes colonnes `renouvellement_stage.conventionStageEnCours*` sont supprimées
   (`migration_prod_drop_convention_stage_en_cours.sql`, 2026-10-21).
-- **Circuit comme les stages** :
-  - Admin : **Traiter** (`PUT /stages/renouvellements/:id/traiter`) puis **Accepter / Refuser dès EN_ATTENTE**.
-  - Agent : **Approuver** (EN_ATTENTE) → **Accepter** (PROGRAMMATION_EN_COURS, permission VALIDER) → **Refuser**
-    (permission REJETER), dans ses directions, y compris les dossiers re-soumis.
-  - Pas de bouton « Exiger un document ». Refus : seule la lettre peut être déclarée non conforme.
-  - Rouvrir / annuler l'approbation / expirer / supprimer : **ADMIN uniquement** (pour le moment).
+- **Circuit** (validé le 2026-10-21) :
+  1. **En attente** à la soumission (`dateEnAttente` = début du délai).
+  2. Les agents de la **direction concernée** (RENOUVELLEMENT/APPROUVER) **Approuvent** → **En cours de programmation**,
+     ou **Rejettent** (REJETER). L'admin a aussi le bouton Approuver. **Sans action pendant 48 h** (week-end compris),
+     approbation **automatique** (`stageStatusJob.approuverRenouvellementsAutomatiquement`, « Système (approbation
+     automatique après 48 h) »). Le délai repart à la re-soumission, à la réouverture et à l'annulation de l'approbation.
+     Plus d'étape « En traitement » ni de bouton « Traiter ».
+  3. Les **agents RH** (rôle lecture globale + RENOUVELLEMENT/VALIDER, ex. Christine) joignent la convention depuis
+     « Renouvellement (Vue globale) » → « En programmation » (sous-écrans comme « Stage (Vue globale) ») ; ils
+     gardent aussi « Renouvellement DRH » pour leur direction. Convention jointe → Accepté / En cours.
+  - **Notifications** : passage en programmation (manuel ou automatique) → e-mail + push aux agents RH
+    (`notificationService.onRenouvellementsAProgrammer`) ; candidat notifié à chaque étape.
+  - **Rejet** : agents (REJETER, dans leur direction) **tant que la convention n'est pas jointe** ; **admin à tout
+    moment** (y compris accepté / en cours) et suppression. Seule la lettre peut être déclarée non conforme.
+  - L'admin garde le raccourci : accepter directement avec la convention dès « En attente ».
+  - Rouvrir / annuler l'approbation / expirer / supprimer : **ADMIN uniquement**.
 - Dates du renouvellement modifiables (accepté / en cours) via `PUT /stages/:idStageNouveau`, comme un stage.
 - **Statut « Prolongé »** : stage initial expiré + renouvellement ACCEPTE/EN_COURS/SUSPENDU → affiché « Prolongé »
   (statut **calculé** `statutAffiche` ; en base `statusStage` reste EXPIRE). Il ne repasse « Expiré » qu'à la fin
@@ -392,3 +402,7 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
 - **Direction 8 = DTL** (Transport et Logistique) : **aucun agent rattaché** → ses dossiers (40 demandes en traitement,
   1 en programmation, renouvellement n°10) ne sont visibles que de l'admin et des rôles à lecture globale. À régler
   par l'administration (rattacher un agent à la DTL), pas par le code.
+- **Circuit du renouvellement** (voir « Règles métier : renouvellement ») : approbation automatique après 48 h,
+  « Traiter » supprimé (route, service, écran), rejet admin à tout moment, vue globale RH en sous-écrans, notification
+  des agents RH. Migration `migration_prod_renouvellement_approbation_auto.sql` (colonne `dateEnAttente` ; demandes
+  existantes : délai de 48 h à partir du déploiement — sur la copie : 14 demandes, 0 approbation au 1er passage).

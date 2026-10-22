@@ -239,7 +239,7 @@ describe('evaluateRenouvellement', () => {
   });
 });
 
-describe('circuit « comme les stages » (Traiter / Accepter dès EN_ATTENTE pour l\'admin)', () => {
+describe('circuit du renouvellement (Approuver, rejet, raccourci de l\'admin)', () => {
   test('l\'admin peut accepter directement un renouvellement EN_ATTENTE', async () => {
     const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
     const candidat = await creerCandidat();
@@ -262,32 +262,43 @@ describe('circuit « comme les stages » (Traiter / Accepter dès EN_ATTENTE pou
     ).rejects.toThrow('doit être approuvé');
   });
 
-  test('Traiter passe EN_ATTENTE → EN_COURS_DE_TRAITEMENT, puis le refus reste possible', async () => {
+  test('Approuver passe EN_ATTENTE → PROGRAMMATION_EN_COURS et prévient la RH', async () => {
+    const notifService = require('../notification.service');
     const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
     const candidat = await creerCandidat();
     const { renouvellement } = await creerRenouvellement(direction, candidat.idcandidats, '2026-03-31', 'EN_ATTENTE');
+    notifService.onRenouvellementsAProgrammer.mockClear();
 
-    const traite = await stageService.mettreEnTraitementRenouvellement(renouvellement.idrenouvellement, { isSystemRole: true });
-    expect(traite.statusRenouvellement).toBe('EN_COURS_DE_TRAITEMENT');
-
-    await stageService.evaluateRenouvellement(renouvellement.idrenouvellement, { statusRenouvellement: 'REJETE', motifRefus: 'Incomplet' }, { isSystemRole: true });
-    await renouvellement.reload();
-    expect(renouvellement.statusRenouvellement).toBe('REJETE');
-  });
-
-  test('Approuver est possible après Traiter (EN_COURS_DE_TRAITEMENT → PROGRAMMATION_EN_COURS)', async () => {
-    const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
-    const candidat = await creerCandidat();
-    const { renouvellement } = await creerRenouvellement(direction, candidat.idcandidats, '2026-03-31', 'EN_ATTENTE');
-
-    await stageService.mettreEnTraitementRenouvellement(renouvellement.idrenouvellement, { isSystemRole: true });
     await stageService.approuverRenouvellement(renouvellement.idrenouvellement, { isSystemRole: true });
 
     await renouvellement.reload();
     expect(renouvellement.statusRenouvellement).toBe('PROGRAMMATION_EN_COURS');
+    expect(notifService.onRenouvellementsAProgrammer).toHaveBeenCalledTimes(1);
     // Déjà approuvé : une seconde approbation est refusée
     await expect(stageService.approuverRenouvellement(renouvellement.idrenouvellement, { isSystemRole: true }))
       .rejects.toThrow('ne peut pas être approuvé');
+  });
+
+  test('rejet : un agent tant que la convention n\'est pas jointe, l\'admin aussi après l\'acceptation', async () => {
+    const direction = await Direction.create({ nom: 'D1', accronyme: 'D1' });
+    const candidat = await creerCandidat();
+    const agent = await creerAgent(direction.iddirection);
+    const contexteAgent = { agentId: agent.idagents, isSystemRole: false };
+
+    // Agent : rejet possible en cours de programmation
+    const programme = await creerRenouvellement(direction, candidat.idcandidats, '2026-03-31', 'PROGRAMMATION_EN_COURS');
+    await stageService.evaluateRenouvellement(programme.renouvellement.idrenouvellement, { statusRenouvellement: 'REJETE', motifRefus: 'Dossier incomplet' }, contexteAgent);
+    await programme.renouvellement.reload();
+    expect(programme.renouvellement.statusRenouvellement).toBe('REJETE');
+
+    // Renouvellement accepté (convention jointe) : refusé à l'agent, possible pour l'admin
+    const accepte = await creerRenouvellement(direction, candidat.idcandidats, '2026-03-31', 'ACCEPTE');
+    await expect(
+      stageService.evaluateRenouvellement(accepte.renouvellement.idrenouvellement, { statusRenouvellement: 'REJETE', motifRefus: 'Trop tard' }, contexteAgent)
+    ).rejects.toThrow('ne peut pas être refusé');
+    await stageService.evaluateRenouvellement(accepte.renouvellement.idrenouvellement, { statusRenouvellement: 'REJETE', motifRefus: 'Décision de l\'administration' }, { isSystemRole: true, isAdmin: true });
+    await accepte.renouvellement.reload();
+    expect(accepte.renouvellement.statusRenouvellement).toBe('REJETE');
   });
 
   test('la convention affichée est celle de la demande de stage (stage actuel)', async () => {

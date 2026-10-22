@@ -1427,6 +1427,13 @@ const approuverRenouvellement = async (id, agentContext = null) => {
     lastModifiedDate: new Date(),
   });
 
+  // Les agents RH joignent la convention (envoi en arrière-plan, jamais bloquant : erreurs gérées dans le service)
+  const candidatApprouve = renouvellement.stageNouveau?.candidat;
+  notifService.onRenouvellementsAProgrammer([{
+    candidat: candidatApprouve ? `${candidatApprouve.prenom} ${candidatApprouve.nom}` : `Renouvellement n°${renouvellement.idrenouvellement}`,
+    dureeDemandee: renouvellement.dureeDemandee,
+  }]);
+
   // Notification au candidat
   try {
     const candidat = renouvellement.stageNouveau?.candidat;
@@ -1454,33 +1461,6 @@ const approuverRenouvellement = async (id, agentContext = null) => {
   } catch (e) {
     console.error('❌ Notif approbation renouvellement:', e.message);
   }
-
-  return renouvellement.reload();
-};
-
-/**
- * Mettre un renouvellement en traitement (EN_ATTENTE → EN_COURS_DE_TRAITEMENT) — bouton
- * « Traiter » de l'administration, comme pour la demande de stage.
- */
-const mettreEnTraitementRenouvellement = async (id, agentContext = null) => {
-  const renouvellement = await RenouvellementStage.findOne({
-    where: { idrenouvellement: id, del: 0 },
-    include: [{ model: Stage, as: 'stageNouveau', attributes: ['idstage', 'direction_iddirection'] }],
-  });
-
-  if (!renouvellement) throw new Error('Renouvellement non trouvé');
-  if (renouvellement.statusRenouvellement !== 'EN_ATTENTE') {
-    throw new Error(`Seul un renouvellement en attente peut être mis en traitement (statut actuel : ${renouvellement.statusRenouvellement})`);
-  }
-
-  await assertAgentOwnsDirection(agentContext, renouvellement.stageNouveau?.direction_iddirection);
-
-  const nomAgent = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
-  await renouvellement.update({
-    statusRenouvellement: 'EN_COURS_DE_TRAITEMENT',
-    lastModifiedBy: nomAgent,
-    lastModifiedDate: new Date(),
-  });
 
   return renouvellement.reload();
 };
@@ -1532,6 +1512,7 @@ const rouvrirRenouvellement = async (id) => {
 
   await renouvellement.update({
     statusRenouvellement: 'EN_ATTENTE',
+    dateEnAttente: new Date(),
     motifRefus: null,
     lettreNonConforme: 0,
     conventionNonConforme: 0,
@@ -1588,6 +1569,7 @@ const annulerApprobationRenouvellement = async (id, agentContext = null) => {
   const nomAgent = agentContext?.nom ? `${agentContext.prenom || ''} ${agentContext.nom}`.trim() : 'Admin';
   await renouvellement.update({
     statusRenouvellement: 'EN_ATTENTE',
+    dateEnAttente: new Date(),
     lastModifiedBy: nomAgent,
     lastModifiedDate: new Date(),
   });
@@ -1657,10 +1639,12 @@ const evaluateRenouvellement = async (id, data, agentContext = null, file = null
   // Même circuit que la demande de stage : l'administration peut accepter dès EN_ATTENTE /
   // EN_COURS_DE_TRAITEMENT ; un agent n'accepte qu'après approbation (PROGRAMMATION_EN_COURS).
   // Le refus est possible à toutes les étapes avant décision.
+  // Rejet : par un agent tant que la convention n'est pas jointe (avant décision) ; par l'administration
+  // à tout moment, y compris un renouvellement accepté ou en cours.
   const STATUTS_AVANT_DECISION = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'];
-  const statusValides = (data.statusRenouvellement === 'REJETE' || agentContext?.isAdmin)
-    ? STATUTS_AVANT_DECISION
-    : ['PROGRAMMATION_EN_COURS'];
+  const statusValides = data.statusRenouvellement === 'REJETE'
+    ? (agentContext?.isAdmin ? [...STATUTS_AVANT_DECISION, 'ACCEPTE', 'EN_COURS', 'SUSPENDU'] : STATUTS_AVANT_DECISION)
+    : (agentContext?.isAdmin ? STATUTS_AVANT_DECISION : ['PROGRAMMATION_EN_COURS']);
 
   if (!statusValides.includes(renouvellement.statusRenouvellement)) {
     throw new Error(
@@ -1816,6 +1800,7 @@ const resoumettreRenouvellement = async (id, candidatId, files = {}) => {
 
   const updateData = {
     statusRenouvellement: 'EN_ATTENTE',
+    dateEnAttente: new Date(),
     motifRefus: null,
     lettreNonConforme: 0,
     conventionNonConforme: 0,
@@ -3067,7 +3052,6 @@ module.exports = {
   evaluateRenouvellement,
   resoumettreRenouvellement,
   rouvrirRenouvellement,
-  mettreEnTraitementRenouvellement,
   downloadConventionDemandeRenouvellement,
   expirerRenouvellement,
   annulerApprobationRenouvellement,
