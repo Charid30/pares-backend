@@ -102,6 +102,15 @@ pares-frontend/src/features/dashboard/
   `up(connection, { uploadsRoot, log })` — réservé aux opérations qui touchent les fichiers déposés.
   Test sur une copie : `DB_NAME=pares_db_test MIGRATION_UPLOADS_ROOT=<copie de uploads> node scripts/run-migrations.js`.
 - Upload d'un document de stage (`POST /stages/documents`) : **`dateEmission` est obligatoire**.
+- **Inscription (sécurité, 2026-10-22)** : `POST /auth/register` = honeypot → `validate(registerSchema)` → jeton de
+  formulaire (`formTokenStore`) : **15 min**, lié à l'IP + navigateur, refusé moins de 15 s après sa délivrance
+  (`FORM_TOKEN_TROP_RAPIDE` + `retryAfter`), consommé seulement s'il est accepté. Le formulaire le renouvelle toutes
+  les 14 min et rattrape seul un refus de jeton (nouveau jeton / attente puis renvoi). Règles partagées
+  (`auth.validator.js`) : nom / prénom avec **un chiffre au plus** (`NOM_PATTERN`, ex. « 1re Jumelle »),
+  **username en un seul mot** (`USERNAME_PATTERN`), e-mails jetables refusés (`utils/emailsJetables.js`).
+  `PUT /candidat/profil` applique les mêmes règles aux champs **modifiés** (anciens profils non conformes enregistrables).
+  `security.middleware.js` bloque aussi les sondes d'injection de gabarit (`${…}`, `#{…}`, `{{…}}`, `<%=`) — compte
+  `xalgotest77` (mailinator) d'août 2026. Les champs texte des routes multipart ne passent pas par ce middleware.
 
 ### Frontend Angular
 - Respecter la syntaxe du fichier existant : composants admin récents en `@if`/`@for`,

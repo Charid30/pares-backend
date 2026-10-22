@@ -1,5 +1,17 @@
 // src/validators/auth.validator.js
 const Joi = require('joi');
+const { estEmailJetable } = require('../utils/emailsJetables');
+
+// Nom / prénom : lettres, espaces, apostrophes, tirets, et UN chiffre au plus (ex. « Sirina 1re Jumelle »)
+const NOM_PATTERN = /^(?!(?:[^0-9]*[0-9]){2})[A-Za-zÀ-ÿ0-9\s'\-]{2,80}$/;
+const NOM_MESSAGE = (libelle) => `Le ${libelle} ne doit contenir que des lettres, espaces, apostrophes ou tirets, et un seul chiffre au plus (ex. « 1re Jumelle »)`;
+// Nom d'utilisateur : un seul mot (pas d'espace) — lettres, chiffres, point, tiret, tiret bas
+const USERNAME_PATTERN = /^[A-Za-z0-9._-]{3,30}$/;
+const USERNAME_MESSAGE = 'Le nom d\'utilisateur doit être un seul mot de 3 à 30 caractères (lettres, chiffres, point, tiret ou tiret bas), sans espace — ex. jean.ouedraogo';
+const TELEPHONE_PATTERN = /^[0-9]{8,20}$/;
+const EMAIL_JETABLE_MESSAGE = 'Les adresses e-mail temporaires (jetables) ne sont pas acceptées : utilisez votre adresse habituelle';
+
+const refuserEmailJetable = (valeur, helpers) => (estEmailJetable(valeur) ? helpers.message(EMAIL_JETABLE_MESSAGE) : valeur);
 
 /**
  * Schéma de validation pour l'inscription (register)
@@ -7,13 +19,12 @@ const Joi = require('joi');
 const registerSchema = Joi.object({
   // User
   username: Joi.string()
-    .min(3)
-    .max(50)
+    .trim()
+    .pattern(USERNAME_PATTERN)
     .required()
     .messages({
       'string.empty': 'Le nom d\'utilisateur est requis',
-      'string.min': 'Le nom d\'utilisateur doit contenir au moins 3 caractères',
-      'string.max': 'Le nom d\'utilisateur ne peut pas dépasser 50 caractères',
+      'string.pattern.base': USERNAME_MESSAGE,
     }),
   
   password: Joi.string()
@@ -43,23 +54,27 @@ const registerSchema = Joi.object({
   
   // Candidat
   nom: Joi.string()
-    .pattern(/^[A-Za-zÀ-ÿ\s'\-]{2,80}$/)
+    .trim()
+    .pattern(NOM_PATTERN)
     .required()
     .messages({
       'string.empty': 'Le nom est requis',
-      'string.pattern.base': 'Le nom ne doit contenir que des lettres, espaces, apostrophes ou tirets',
+      'string.pattern.base': NOM_MESSAGE('nom'),
     }),
 
   prenom: Joi.string()
-    .pattern(/^[A-Za-zÀ-ÿ\s'\-]{2,80}$/)
+    .trim()
+    .pattern(NOM_PATTERN)
     .required()
     .messages({
       'string.empty': 'Le prénom est requis',
-      'string.pattern.base': 'Le prénom ne doit contenir que des lettres, espaces, apostrophes ou tirets',
+      'string.pattern.base': NOM_MESSAGE('prénom'),
     }),
-  
+
   email: Joi.string()
+    .trim()
     .email()
+    .custom(refuserEmailJetable)
     .required()
     .messages({
       'string.empty': 'L\'email est requis',
@@ -67,7 +82,7 @@ const registerSchema = Joi.object({
     }),
   
   telephone: Joi.string()
-    .pattern(/^[0-9]{8,20}$/)
+    .pattern(TELEPHONE_PATTERN)
     .required()
     .messages({
       'string.empty': 'Le téléphone est requis',
@@ -155,6 +170,12 @@ const resetPasswordSchema = Joi.object({
 });
 
 module.exports = {
+  NOM_PATTERN,
+  NOM_MESSAGE,
+  USERNAME_PATTERN,
+  USERNAME_MESSAGE,
+  TELEPHONE_PATTERN,
+  EMAIL_JETABLE_MESSAGE,
   registerSchema,
   loginSchema,
   forgotPasswordSchema,

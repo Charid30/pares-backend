@@ -7,7 +7,7 @@ const { Role, User, Candidat, Direction } = require('../../models');
 const creerCandidat = async (overrides = {}) => {
   const role = await Role.create({ accronyme: `CANDIDAT-${Date.now()}-${Math.random()}`, description: 'Candidat' });
   const user = await User.create({
-    username: `user.${Date.now()}.${Math.random()}`,
+    username: `user.${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 10)}`,
     password: 'motdepasse',
     role_idrole: role.idrole,
   });

@@ -35,6 +35,12 @@ const INJECTION_PATTERNS = [
   // Injection de commandes
   { regex: /[;&|`]\s*(ls|cat|rm|wget|curl|bash|sh|python|perl|nc|ncat)\b/i, label: 'CMD_INJECTION' },
   { regex: /\$\((.*)\)|\`(.*)\`/,                                            label: 'CMD_SUBSHELL' },
+
+  // Injection de gabarit (SSTI) : ${7*7}, #{7*7}, {{7*7}}, <%= … %> (sondes vues en production, août 2026)
+  { regex: /\$\{[^}]{1,200}\}/,      label: 'SSTI_DOLLAR' },
+  { regex: /#\{[^}]{1,200}\}/,       label: 'SSTI_HASH' },
+  { regex: /\{\{[^}]{1,200}\}\}/,    label: 'SSTI_MOUSTACHE' },
+  { regex: /<%[=\-\s]/,              label: 'SSTI_ERB' },
 ];
 
 // Extraire l'IP réelle — on utilise req.ip qu'Express résout via trust proxy

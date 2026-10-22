@@ -13,6 +13,11 @@ const {
   sequelize,
 } = require('../models');
 const { Op } = require('sequelize');
+const Joi = require('joi');
+const {
+  NOM_PATTERN, NOM_MESSAGE, USERNAME_PATTERN, USERNAME_MESSAGE, TELEPHONE_PATTERN, EMAIL_JETABLE_MESSAGE,
+} = require('../validators/auth.validator');
+const { estEmailJetable } = require('../utils/emailsJetables');
 const emailService = require('./email.service');
 const notifService = require('./notification.service');
 const { calculerDateFin, getDureeContinueCandidat, enrichirAvecChaine } = require('./stage.service');
@@ -73,6 +78,30 @@ const updateProfilCandidat = async (candidatId, data) => {
   // Validation genre
   if (updateData.genre && !['HOMME', 'FEMME'].includes(updateData.genre)) {
     throw new Error('Genre invalide. Valeurs acceptées : HOMME, FEMME');
+  }
+
+  // Champs d'identité modifiés : mêmes règles qu'à l'inscription (ce contrôle manquait : un compte a enregistré
+  // « IDOR_TEST_HACKED », « ${7*7} » par cette route). Un champ inchangé n'est pas revérifié, pour qu'un ancien
+  // profil non conforme puisse toujours être enregistré.
+  const modifie = (champ) => updateData[champ] !== undefined
+    && String(updateData[champ] ?? '').trim() !== String(candidat[champ] ?? '').trim();
+  for (const [champ, libelle] of [['nom', 'nom'], ['prenom', 'prénom']]) {
+    if (!modifie(champ)) continue;
+    updateData[champ] = String(updateData[champ] ?? '').trim();
+    if (!NOM_PATTERN.test(updateData[champ])) throw new Error(NOM_MESSAGE(libelle));
+  }
+  if (modifie('telephone')) {
+    updateData.telephone = String(updateData.telephone ?? '').trim();
+    if (!TELEPHONE_PATTERN.test(updateData.telephone)) throw new Error('Le téléphone doit contenir entre 8 et 20 chiffres');
+  }
+  if (modifie('email')) {
+    updateData.email = String(updateData.email ?? '').trim();
+    if (Joi.string().email().validate(updateData.email).error) throw new Error('L\'email n\'est pas valide');
+    if (estEmailJetable(updateData.email)) throw new Error(EMAIL_JETABLE_MESSAGE);
+  }
+  if (data.username !== undefined && data.username !== candidat.user?.username) {
+    data.username = String(data.username ?? '').trim();
+    if (!USERNAME_PATTERN.test(data.username)) throw new Error(USERNAME_MESSAGE);
   }
 
   // ── IFU / Récépissé — exclusif : on ne peut avoir les deux ──────────────

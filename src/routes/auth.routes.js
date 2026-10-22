@@ -18,7 +18,8 @@ router.get('/form-token', authController.getFormToken);
  * @route   POST /api/auth/register
  * @access  Public
  */
-router.post('/register', honeypot, formToken, validate(registerSchema), authController.register);
+// Jeton vérifié APRÈS la validation : une erreur de saisie ne le consomme pas
+router.post('/register', honeypot, validate(registerSchema), formToken, authController.register);
 
 /**
  * @route   POST /api/auth/login

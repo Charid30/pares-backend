@@ -76,6 +76,10 @@ describe('securityMiddleware — détection d\'injection', () => {
     ['XSS event handler', { html: '<img src=x onerror=alert(1)>' }],
     ['Path traversal', { fichier: '../../../../etc/passwd' }],
     ['Command injection', { nom: 'test; rm -rf /' }],
+    ['SSTI ${…}', { nom: '${7*7}' }],
+    ['SSTI #{…}', { prenom: '#{7*7}' }],
+    ['SSTI {{…}}', { nom: '{{7*7}}' }],
+    ['SSTI <%= %>', { nom: '<%= 7*7 %>' }],
   ])('détecte et bloque : %s', async (_label, payload) => {
     const ip = requete().ip;
     const req = requete({ ip, body: payload });
