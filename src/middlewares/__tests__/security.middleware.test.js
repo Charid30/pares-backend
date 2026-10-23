@@ -187,3 +187,64 @@ describe('securityMiddleware — bannissement automatique', () => {
     expect(log.action).toBe('INJECTION_TENTATIVE');
   });
 });
+
+describe('securityMiddleware — explorateur de base de l\'admin', () => {
+  const { generateToken } = require('../../utils/jwt.util');
+  const { addToBlacklist } = require('../../utils/tokenBlacklist');
+  const SQL = { query: 'SELECT * FROM users WHERE 1=1' };
+
+  const requeteExplorer = (token, overrides = {}) => requete({
+    path: '/admin/db-explorer/query',
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+    body: { ...SQL },
+    ...overrides,
+  });
+
+  test('laisse passer le SQL d\'un ADMIN connecté sur /admin/db-explorer/query', async () => {
+    const token = generateToken({ id: 1, username: 'admin', role: 'ADMIN', roles: ['ADMIN'] });
+    const res = mockRes();
+    const next = jest.fn();
+    await securityMiddleware(requeteExplorer(token), res, next);
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  test('bloque le même SQL envoyé par un candidat', async () => {
+    const ip = '203.0.113.60';
+    const token = generateToken({ id: 2, username: 'cand', role: 'CANDIDAT', roles: ['CANDIDAT'] });
+    const res = mockRes();
+    const next = jest.fn();
+    await securityMiddleware(requeteExplorer(token, { ip }), res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    await attendreBannedIp(ip, (r) => r.attempts >= 1);
+  });
+
+  test('bloque sans jeton, avec un jeton révoqué ou sur une autre route', async () => {
+    const token = generateToken({ id: 1, username: 'admin', role: 'ADMIN', roles: ['ADMIN'] });
+    const revoque = generateToken({ id: 3, username: 'admin2', role: 'ADMIN', roles: ['ADMIN'] });
+    await addToBlacklist(revoque);
+    const cas = [
+      ['203.0.113.61', requeteExplorer(null, { ip: '203.0.113.61' })],
+      ['203.0.113.62', requeteExplorer(revoque, { ip: '203.0.113.62' })],
+      ['203.0.113.63', requeteExplorer(token, { ip: '203.0.113.63', path: '/candidat/profil' })],
+    ];
+    for (const [ip, req] of cas) {
+      const res = mockRes();
+      const next = jest.fn();
+      await securityMiddleware(req, res, next);
+      expect(next).not.toHaveBeenCalled();
+      await attendreBannedIp(ip, (r) => r.attempts >= 1);
+    }
+  });
+
+  test('les autres champs de la requête admin restent analysés', async () => {
+    const ip = '203.0.113.64';
+    const token = generateToken({ id: 1, username: 'admin', role: 'ADMIN', roles: ['ADMIN'] });
+    const res = mockRes();
+    const next = jest.fn();
+    await securityMiddleware(requeteExplorer(token, { ip, body: { ...SQL, note: '<script>alert(1)</script>' } }), res, next);
+    expect(next).not.toHaveBeenCalled();
+    await attendreBannedIp(ip, (r) => r.attempts >= 1);
+  });
+});

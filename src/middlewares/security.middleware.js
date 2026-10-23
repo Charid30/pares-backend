@@ -43,6 +43,27 @@ const INJECTION_PATTERNS = [
   { regex: /<%[=\-\s]/,              label: 'SSTI_ERB' },
 ];
 
+// Exception unique : l'explorateur de base de l'admin (POST /api/admin/db-explorer/query) envoie du SQL par
+// nature. Seul son champ `query` échappe à l'analyse, et seulement pour un jeton ADMIN valide (non révoqué) ;
+// tout autre utilisateur qui y envoie du SQL est traité comme une tentative d'injection.
+const ROUTE_DB_EXPLORER = '/admin/db-explorer/query';
+
+async function estRequeteDbExplorerAdmin(req) {
+  if (req.method !== 'POST' || req.path !== ROUTE_DB_EXPLORER) return false;
+  try {
+    const { extractToken } = require('./auth.middleware');
+    const { verifyToken } = require('../utils/jwt.util');
+    const { isBlacklisted } = require('../utils/tokenBlacklist');
+    const token = extractToken(req);
+    if (!token || await isBlacklisted(token)) return false;
+    const decoded = verifyToken(token);
+    const roles = Array.isArray(decoded?.roles) && decoded.roles.length ? decoded.roles : [decoded?.role];
+    return roles.includes('ADMIN');
+  } catch {
+    return false;
+  }
+}
+
 // Extraire l'IP réelle — on utilise req.ip qu'Express résout via trust proxy
 // (app.set('trust proxy', 1) dans app.js).
 // Ne jamais lire x-forwarded-for directement : c'est contrôlable par l'attaquant.
@@ -151,7 +172,12 @@ const securityMiddleware = async (req, res, next) => {
   }
 
   // 2. Analyser le contenu de la requête
-  const sources = [req.body, req.params, req.query];
+  let body = req.body;
+  if (body && typeof body.query === 'string' && await estRequeteDbExplorerAdmin(req)) {
+    const { query, ...reste } = body; // eslint-disable-line no-unused-vars
+    body = reste;
+  }
+  const sources = [body, req.params, req.query];
   for (const source of sources) {
     if (!source) continue;
     const match = detectInValue(source);

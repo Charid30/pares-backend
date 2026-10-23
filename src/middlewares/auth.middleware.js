@@ -235,4 +235,4 @@ const authorizeActionSurStage = (action) => async (req, res, next) => {
   return authorizeAction(req.permissionModule, action)(req, res, next);
 };
 
-module.exports = { authenticate, authorize, authorizeModule, authorizeAction, authorizeAnyAction, authorizeActionSurStage };
+module.exports = { extractToken, authenticate, authorize, authorizeModule, authorizeAction, authorizeAnyAction, authorizeActionSurStage };
