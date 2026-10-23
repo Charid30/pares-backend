@@ -570,6 +570,13 @@ const soumettreDemandeStage = async (candidatId, data, files) => {
     if (!data.niveau) {
       throw new Error('Le niveau est obligatoire pour ce type de stage');
     }
+    // Mêmes listes que le formulaire : BAC PRO seulement en soutenance (fin d'études)
+    const niveauxAutorises = data.typeStage === 'SOUTENANCE'
+      ? ['BAC_PRO', 'LICENCE', 'MASTER', 'DOCTORAT']
+      : ['CAP', 'BEPC', 'BEP', 'BAC', 'LICENCE', 'MASTER', 'DOCTORAT'];
+    if (!niveauxAutorises.includes(data.niveau)) {
+      throw new Error('Niveau invalide pour ce type de stage');
+    }
     stageData.niveau = data.niveau;
   }
 

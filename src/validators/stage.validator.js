@@ -23,7 +23,7 @@ const createStageSchema = Joi.object({
     }),
 
   niveau: Joi.string()
-    .valid('CAP', 'BEPC', 'BEP', 'BAC', 'LICENCE', 'MASTER', 'DOCTORAT')
+    .valid('CAP', 'BEPC', 'BEP', 'BAC', 'BAC_PRO', 'LICENCE', 'MASTER', 'DOCTORAT')
     .when('typeStage', {
       is: Joi.valid('SOUTENANCE', 'PERFECTIONNEMENT'),
       then: Joi.required().messages({
@@ -31,6 +31,11 @@ const createStageSchema = Joi.object({
         'any.only': 'Niveau invalide',
       }),
       otherwise: Joi.optional(),
+    })
+    // BAC PRO seulement pour le stage de soutenance (fin d'études)
+    .when('typeStage', {
+      not: 'SOUTENANCE',
+      then: Joi.invalid('BAC_PRO').messages({ 'any.invalid': 'Le niveau BAC PRO est réservé au stage de soutenance' }),
     }),
 
   // Note: fichiers (lettreRecommandation, dernierDiplome...) validés dans le service via multer
