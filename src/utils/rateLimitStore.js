@@ -1,11 +1,15 @@
 // src/utils/rateLimitStore.js
 // Store MySQL pour express-rate-limit — remplace le store en mémoire (volatile).
 // Chaque compteur est identifié par la clé IP/route et expire après windowMs.
+// `prefix` sépare les compteurs de chaque limiteur dans la table commune : sans lui, tous les limiteurs
+// écrivaient sous la même clé (l'IP) et s'additionnaient — une simple navigation remplissait le compteur
+// de la connexion (10) et bloquait le premier essai de connexion « pendant 15 minutes » (2026-10-24).
 const { Op } = require('sequelize');
 
 class MySQLRateLimitStore {
   constructor(options = {}) {
     this.windowMs = options.windowMs || 15 * 60 * 1000;
+    this.prefix = options.prefix || '';
     // Nettoyage périodique des entrées expirées (toutes les 10 min)
     setInterval(() => this._cleanup(), 10 * 60 * 1000).unref();
   }
@@ -15,7 +19,8 @@ class MySQLRateLimitStore {
     if (options.windowMs) this.windowMs = options.windowMs;
   }
 
-  async increment(key) {
+  async increment(cle) {
+    const key = this.prefix + cle;
     const { RateLimitEntry } = require('../models');
     const now = new Date();
     const resetTime = new Date(now.getTime() + this.windowMs);
@@ -47,7 +52,8 @@ class MySQLRateLimitStore {
     }
   }
 
-  async decrement(key) {
+  async decrement(cle) {
+    const key = this.prefix + cle;
     try {
       const { RateLimitEntry } = require('../models');
       await RateLimitEntry.decrement('hits', { where: { key, hits: { [Op.gt]: 0 } } });
@@ -56,7 +62,8 @@ class MySQLRateLimitStore {
     }
   }
 
-  async resetKey(key) {
+  async resetKey(cle) {
+    const key = this.prefix + cle;
     try {
       const { RateLimitEntry } = require('../models');
       await RateLimitEntry.destroy({ where: { key } });

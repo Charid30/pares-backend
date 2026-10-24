@@ -24,7 +24,9 @@ app.set('trust proxy', 1);
 // RATE LIMITING
 // =====================================================
 
-// Limite générale : 300 requêtes par 15 minutes par IP (store MySQL — persiste les redémarrages)
+// Chaque limiteur a son propre compteur (préfixe) dans le store MySQL commun — persiste les redémarrages.
+
+// Limite générale : 300 requêtes par 15 minutes par IP (hors routes d'authentification)
 const generalWindowMs = 15 * 60 * 1000;
 const AUTH_ROUTES = ['/api/auth/login', '/api/auth/register', '/api/auth/forgot-password', '/api/auth/reset-password'];
 
@@ -33,7 +35,7 @@ const generalLimiter = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
-  store: new MySQLRateLimitStore({ windowMs: generalWindowMs }),
+  store: new MySQLRateLimitStore({ windowMs: generalWindowMs, prefix: 'general:' }),
   skip: (req) => AUTH_ROUTES.some(r => req.path === r || req.originalUrl.startsWith(r)),
   message: {
     success: false,
@@ -41,20 +43,22 @@ const generalLimiter = rateLimit({
   }
 });
 
-// Limite stricte pour login/register : anti brute-force
-// En développement : limite élevée pour ne pas bloquer pendant les tests
+// Anti brute-force des routes d'authentification : un compteur par route et par IP, et seuls les
+// ÉCHECS comptent (une connexion réussie ne consomme rien). Complète le verrouillage du compte
+// après 5 mots de passe erronés (auth.service.js). En développement : limite élevée pour les tests.
 const authWindowMs = 15 * 60 * 1000;
-const authLimiter = rateLimit({
+const limiteurAuth = (prefix, max, message) => rateLimit({
   windowMs: authWindowMs,
-  max: env.NODE_ENV === 'development' ? 500 : 10,
+  max: env.NODE_ENV === 'development' ? 500 : max,
   standardHeaders: true,
   legacyHeaders: false,
-  store: new MySQLRateLimitStore({ windowMs: authWindowMs }),
-  message: {
-    success: false,
-    message: 'Trop de tentatives de connexion, veuillez réessayer dans 15 minutes.'
-  }
+  skipSuccessfulRequests: true,
+  store: new MySQLRateLimitStore({ windowMs: authWindowMs, prefix }),
+  message: { success: false, message },
 });
+const loginLimiter = limiteurAuth('login:', 20, 'Trop de tentatives de connexion échouées depuis cette adresse, veuillez réessayer dans 15 minutes.');
+const registerLimiter = limiteurAuth('register:', 10, "Trop de tentatives d'inscription, veuillez réessayer dans 15 minutes.");
+const resetPasswordLimiter = limiteurAuth('reset:', 10, 'Trop de tentatives, veuillez réessayer dans 15 minutes.');
 
 // Limite souple pour forgot-password : le cooldown de 240s métier est déjà en place,
 // ce limiter sert uniquement d'anti-abus réseau (ex: scripts automatisés)
@@ -64,7 +68,7 @@ const forgotPasswordLimiter = rateLimit({
   max: env.NODE_ENV === 'development' ? 500 : 5,
   standardHeaders: true,
   legacyHeaders: false,
-  store: new MySQLRateLimitStore({ windowMs: forgotPasswordWindowMs }),
+  store: new MySQLRateLimitStore({ windowMs: forgotPasswordWindowMs, prefix: 'forgot:' }),
   message: {
     success: false,
     message: 'Trop de demandes de réinitialisation. Veuillez réessayer dans 1 heure.'
@@ -165,9 +169,9 @@ app.use(morgan(env.NODE_ENV === 'development' ? 'dev' : 'combined'));
 app.use('/api', generalLimiter);
 
 // Appliquer le rate limiter strict sur les routes d'authentification
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
-app.use('/api/auth/reset-password', authLimiter);
+app.use('/api/auth/login', loginLimiter);
+app.use('/api/auth/register', registerLimiter);
+app.use('/api/auth/reset-password', resetPasswordLimiter);
 // Limiter dédié pour forgot-password (plus souple — cooldown 240s déjà géré côté métier)
 app.use('/api/auth/forgot-password', forgotPasswordLimiter);
 
