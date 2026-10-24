@@ -161,6 +161,59 @@ describe('login', () => {
   });
 });
 
+describe('login — verrouillage après échecs rapprochés', () => {
+  const QUINZE_MIN = 15 * 60 * 1000;
+  let maintenant;
+  beforeEach(() => {
+    maintenant = Date.now();
+    jest.spyOn(Date, 'now').mockImplementation(() => maintenant);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  const echouer = () => authService.login('jane.doe', 'mauvais').catch((e) => e.message);
+
+  test('5 échecs en moins de 15 minutes verrouillent le compte', async () => {
+    await creerCandidatAvecCompte('jane.doe', 'motdepasse123');
+    for (let i = 0; i < 4; i++) { expect(await echouer()).toMatch('incorrect'); maintenant += 60 * 1000; }
+    expect(await echouer()).toMatch('verrouillé pendant 15 minutes');
+    await expect(authService.login('jane.doe', 'motdepasse123')).rejects.toThrow('temporairement verrouillé');
+  });
+
+  test('des échecs anciens ne comptent plus : une erreur aujourd\'hui ne verrouille pas', async () => {
+    const { user } = await creerCandidatAvecCompte('jane.doe', 'motdepasse123');
+    // État hérité d'avant la correction : 7 échecs accumulés, verrou terminé depuis longtemps
+    await user.update({ failedLoginAttempts: 7, lockedUntil: new Date(maintenant - 30 * 24 * 3600 * 1000), dernierEchecConnexion: null });
+
+    expect(await echouer()).toMatch('incorrect'); // et non « verrouillé »
+    await user.reload();
+    expect(user.failedLoginAttempts).toBe(1);
+    expect(user.lockedUntil).toBeNull();
+  });
+
+  test('le compteur repart de 1 quand le dernier échec date de plus de 15 minutes', async () => {
+    const { user } = await creerCandidatAvecCompte('jane.doe', 'motdepasse123');
+    for (let i = 0; i < 4; i++) await echouer();
+    maintenant += QUINZE_MIN + 1000;
+    expect(await echouer()).toMatch('incorrect');
+    await user.reload();
+    expect(user.failedLoginAttempts).toBe(1);
+  });
+
+  test('à la fin du verrouillage, le compte repart de zéro', async () => {
+    const { user } = await creerCandidatAvecCompte('jane.doe', 'motdepasse123');
+    for (let i = 0; i < 5; i++) await echouer();
+    maintenant += QUINZE_MIN + 1000;
+    expect(await echouer()).toMatch('incorrect');
+    await user.reload();
+    expect(user.failedLoginAttempts).toBe(1);
+    const res = await authService.login('jane.doe', 'motdepasse123');
+    expect(res.token).toBeTruthy();
+    await user.reload();
+    expect(user.failedLoginAttempts).toBe(0);
+    expect(user.dernierEchecConnexion).toBeNull();
+  });
+});
+
 describe('forgotPassword', () => {
   test('ne révèle pas si l\'email n\'existe pas (sent:false, notFound:true)', async () => {
     const result = await authService.forgotPassword('inconnu@example.com');

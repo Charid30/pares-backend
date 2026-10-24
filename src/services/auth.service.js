@@ -9,6 +9,10 @@ const notifService = require('./notification.service');
 
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+// Seuls les échecs rapprochés comptent : si le précédent date de plus de 15 min, le compteur repart de 1.
+// Avant le 2026-10-24, le compteur ne baissait jamais (sauf connexion réussie) : un compte à 5 échecs
+// étalés sur des mois se reverrouillait à chaque nouvelle erreur, dès la première.
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
 
 /**
  * Comptabilise un échec de connexion et verrouille le compte au-delà du seuil.
@@ -16,7 +20,16 @@ const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
  * le message d'erreur renvoyé à l'appelant).
  */
 const handleFailedLogin = async (user, ip) => {
+  const maintenant = Date.now();
+  const verrouTermine = user.lockedUntil && new Date(user.lockedUntil).getTime() <= maintenant;
+  const echecAncien = !user.dernierEchecConnexion
+    || maintenant - new Date(user.dernierEchecConnexion).getTime() > LOCKOUT_WINDOW_MS;
+  if (verrouTermine || echecAncien) {
+    user.failedLoginAttempts = 0;
+    user.lockedUntil = null;
+  }
   user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+  user.dernierEchecConnexion = new Date(maintenant);
   const justLocked = user.failedLoginAttempts >= LOCKOUT_THRESHOLD;
 
   if (justLocked) {
@@ -316,7 +329,7 @@ const login = async (identifier, password, rememberMe = false, ip = null) => {
   }
 
   // Compte temporairement verrouillé suite à trop d'échecs de connexion consécutifs
-  if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
+  if (user.lockedUntil && new Date(user.lockedUntil).getTime() > Date.now()) {
     const minutesRestantes = Math.ceil((new Date(user.lockedUntil) - Date.now()) / 60000);
     throw new Error(`Compte temporairement verrouillé suite à trop de tentatives échouées. Réessayez dans ${minutesRestantes} min.`);
   }
@@ -344,6 +357,7 @@ const login = async (identifier, password, rememberMe = false, ip = null) => {
   // sert à corréler une IP suspecte à un compte enregistré
   user.failedLoginAttempts = 0;
   user.lockedUntil = null;
+  user.dernierEchecConnexion = null;
   if (ip) {
     user.last_login_ip = ip;
     user.last_login_at = new Date();

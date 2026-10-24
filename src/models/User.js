@@ -47,13 +47,19 @@ module.exports = (sequelize) => {
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: 0,
-      comment: 'Tentatives de connexion échouées consécutives — remis à 0 dès qu\'une connexion réussit',
+      comment: 'Échecs de connexion rapprochés (moins de 15 min entre deux) — remis à 0 après une connexion réussie ou un verrouillage terminé',
     },
     lockedUntil: {
       type: DataTypes.DATE,
       allowNull: true,
       defaultValue: null,
       comment: 'Verrouillage temporaire du compte après trop d\'échecs de connexion consécutifs',
+    },
+    dernierEchecConnexion: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Date du dernier échec de connexion — seuls les échecs rapprochés (15 min) s\'additionnent',
     },
   }, {
     tableName: 'users',
