@@ -2,9 +2,14 @@
 const {
   User, Candidat, Stage,
   Offre, CandidatureOffre, Aide, CandidatureAide, Agent, Role,
-  DemandeAudience, RenouvellementStage, sequelize
+  DemandeAudience, RenouvellementStage, RapportStage, Direction, AgentDirection, sequelize
 } = require('../models');
 const { Op } = require('sequelize');
+
+// Une demande est acceptée dès que sa convention est jointe, quelle que soit la suite du stage
+const STATUTS_ACCEPTES = ['ACCEPTE', 'EN_COURS', 'SUSPENDU', 'EXPIRE', 'RAPPORT_SOUMIS', 'TERMINE'];
+// Demandes qui attendent la décision d'un agent de la direction
+const STATUTS_A_EXAMINER = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT'];
 
 /**
  * Statistiques principales du dashboard
@@ -119,17 +124,16 @@ const getSecondaryStats = async () => {
     where: { del: 0, stage_parent_idstage: null, statusStage: 'EN_ATTENTE' }
   });
 
-  // Taux de validation : stages traités positivement / total stages
-  const totalStagesAll = await Stage.count({ where: { del: 0, stage_parent_idstage: null } });
-  const stagesTraitesPosCount = await Stage.count({
-    where: {
-      del: 0,
-      stage_parent_idstage: null,
-      statusStage: { [Op.in]: ['ACCEPTE', 'EN_COURS', 'TERMINE'] }
-    }
+  // Taux de validation : demandes acceptées / demandes décidées (les demandes en attente ne comptent pas)
+  const stagesAcceptes = await Stage.count({
+    where: { del: 0, stage_parent_idstage: null, statusStage: { [Op.in]: STATUTS_ACCEPTES } }
   });
-  const tauxValidation = totalStagesAll > 0
-    ? Math.round((stagesTraitesPosCount / totalStagesAll) * 100)
+  const stagesRejetes = await Stage.count({
+    where: { del: 0, stage_parent_idstage: null, statusStage: 'REJETE' }
+  });
+  const stagesDecides = stagesAcceptes + stagesRejetes;
+  const tauxValidation = stagesDecides > 0
+    ? Math.round((stagesAcceptes / stagesDecides) * 100)
     : 0;
 
   // Renouvellements
@@ -291,12 +295,97 @@ const getPendingItems = async (limit = 10) => {
 };
 
 /**
- * Données du graphique - Candidats inscrits et stages validés par mois (6 derniers mois)
+ * Dossiers qui attendent une action, tous modules confondus
+ */
+const getATraiter = async () => {
+  const ilYa7Jours = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const [stages, conventions, stagesEnRetard, renouvellements, offres, audiences, aides, rapports] = await Promise.all([
+    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: { [Op.in]: STATUTS_A_EXAMINER } } }),
+    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'PROGRAMMATION_EN_COURS' } }),
+    Stage.count({
+      where: {
+        del: 0,
+        stage_parent_idstage: null,
+        statusStage: { [Op.in]: [...STATUTS_A_EXAMINER, 'PROGRAMMATION_EN_COURS'] },
+        createdDate: { [Op.lt]: ilYa7Jours }
+      }
+    }),
+    RenouvellementStage.count({
+      where: { del: 0, statusRenouvellement: { [Op.in]: [...STATUTS_A_EXAMINER, 'PROGRAMMATION_EN_COURS'] } }
+    }),
+    Offre.count({ where: { del: 0, statusOffre: 'EN_ATTENTE' } }),
+    DemandeAudience.count({ where: { del: 0, status: 'EN_ATTENTE' } }),
+    Aide.count({ where: { del: 0, creePar: 'CANDIDAT', statusAide: 'EN_ATTENTE' } }),
+    RapportStage.count({ where: { del: 0, statusRapport: { [Op.in]: ['SOUMIS', 'EN_EVALUATION'] } } }),
+  ]);
+
+  return {
+    total: stages + conventions + renouvellements + offres + audiences + aides + rapports,
+    stages,
+    conventions,
+    stagesEnRetard,
+    renouvellements,
+    offres,
+    audiences,
+    aides,
+    rapports,
+  };
+};
+
+/**
+ * Directions qui ont le plus de demandes à examiner, avec leur nombre d'agents
+ */
+const getStagesParDirection = async (limit = 5) => {
+  const lignes = await Stage.findAll({
+    attributes: ['direction_iddirection', [sequelize.fn('COUNT', sequelize.col('idstage')), 'nombre']],
+    where: {
+      del: 0,
+      stage_parent_idstage: null,
+      statusStage: { [Op.in]: STATUTS_A_EXAMINER },
+      direction_iddirection: { [Op.ne]: null }
+    },
+    group: ['direction_iddirection'],
+    order: [[sequelize.literal('nombre'), 'DESC']],
+    limit,
+    raw: true
+  });
+
+  return Promise.all(lignes.map(async (ligne) => {
+    const [direction, agents] = await Promise.all([
+      Direction.findByPk(ligne.direction_iddirection, { attributes: ['nom', 'accronyme'] }),
+      AgentDirection.count({ where: { direction_iddirection: ligne.direction_iddirection } }),
+    ]);
+    return {
+      direction: direction?.accronyme || direction?.nom || 'Direction inconnue',
+      nombre: Number(ligne.nombre),
+      agents,
+    };
+  }));
+};
+
+/**
+ * Stages en cours qui se terminent dans les 7 prochains jours
+ */
+const getStagesBientotTermines = async () => {
+  const aujourdhui = new Date();
+  const dansSeptJours = new Date(aujourdhui.getTime() + 7 * 24 * 60 * 60 * 1000);
+  return Stage.count({
+    where: {
+      del: 0,
+      statusStage: 'EN_COURS',
+      dateFinEffective: {
+        [Op.between]: [aujourdhui.toISOString().slice(0, 10), dansSeptJours.toISOString().slice(0, 10)]
+      }
+    }
+  });
+};
+
+/**
+ * Données du graphique - Candidats inscrits et demandes de stage par mois (6 derniers mois)
  */
 const getChartData = async () => {
   const labels = [];
   const candidats = [];
-  const stagesValides = [];
   const stagesSoumis = [];
 
   const moisNoms = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
@@ -322,30 +411,6 @@ const getChartData = async () => {
     });
     candidats.push(candidatsCount);
 
-    // Stages validés (VALIDE ou TERMINE) ce mois
-    const stagesValidesCount = await Stage.count({
-      where: {
-        del: 0,
-        stage_parent_idstage: null,
-        statusStage: { [Op.in]: ['VALIDE', 'TERMINE', 'EN_COURS'] },
-        [Op.or]: [
-          {
-            lastmodifiedDate: {
-              [Op.gte]: startOfMonth,
-              [Op.lte]: endOfMonth
-            }
-          },
-          {
-            createdDate: {
-              [Op.gte]: startOfMonth,
-              [Op.lte]: endOfMonth
-            }
-          }
-        ]
-      }
-    });
-    stagesValides.push(stagesValidesCount);
-
     // Stages soumis (créés) ce mois
     const stagesSoumisCount = await Stage.count({
       where: {
@@ -360,27 +425,29 @@ const getChartData = async () => {
   return {
     labels,
     candidats,
-    stagesValides,
     stagesSoumis
   };
 };
 
 /**
- * Donut chart — répartition des stages par statut
+ * Répartition des demandes de stage par statut (toutes les demandes sont comptées)
  */
-const getStagesDonut = async () => {
-  const [enAttente, enTraitement, acceptes, enCours, termines, rejetes] = await Promise.all([
-    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'EN_ATTENTE' } }),
-    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: { [Op.in]: ['EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'] } } }),
-    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'ACCEPTE' } }),
-    Stage.count({ where: { del: 0, statusStage: 'EN_COURS' } }),
-    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'TERMINE' } }),
-    Stage.count({ where: { del: 0, stage_parent_idstage: null, statusStage: 'REJETE' } }),
+const getRepartitionStages = async () => {
+  const compter = (statuts) => Stage.count({
+    where: { del: 0, stage_parent_idstage: null, statusStage: { [Op.in]: statuts } }
+  });
+  const [enAttente, enTraitement, enProgrammation, acceptes, enCours, finis, rejetes] = await Promise.all([
+    compter(['EN_ATTENTE']),
+    compter(['EN_COURS_DE_TRAITEMENT']),
+    compter(['PROGRAMMATION_EN_COURS']),
+    compter(['ACCEPTE']),
+    compter(['EN_COURS', 'SUSPENDU']),
+    compter(['EXPIRE', 'RAPPORT_SOUMIS', 'TERMINE']),
+    compter(['REJETE']),
   ]);
   return {
-    labels: ['En attente', 'En traitement', 'Acceptés', 'En cours', 'Terminés', 'Rejetés'],
-    values: [enAttente, enTraitement, acceptes, enCours, termines, rejetes],
-    colors: ['#F59E0B', '#6366F1', '#10B981', '#3B82F6', '#8B5CF6', '#EF4444'],
+    labels: ['En attente', 'En traitement', 'En programmation', 'Acceptés', 'En cours', 'Terminés', 'Rejetés'],
+    values: [enAttente, enTraitement, enProgrammation, acceptes, enCours, finis, rejetes],
   };
 };
 
@@ -401,14 +468,20 @@ const getAudiencesStats = async () => {
  * Données complètes du dashboard
  */
 const getDashboardData = async () => {
-  const [mainStats, secondaryStats, recentActivities, pendingItems, chartData, stagesDonut, audiencesStats] = await Promise.all([
+  const [
+    mainStats, secondaryStats, recentActivities, pendingItems, chartData,
+    repartitionStages, audiencesStats, aTraiter, stagesParDirection, stagesBientotTermines
+  ] = await Promise.all([
     getMainStats(),
     getSecondaryStats(),
     getRecentActivities(8),
     getPendingItems(8),
     getChartData(),
-    getStagesDonut(),
+    getRepartitionStages(),
     getAudiencesStats(),
+    getATraiter(),
+    getStagesParDirection(),
+    getStagesBientotTermines(),
   ]);
 
   return {
@@ -417,8 +490,11 @@ const getDashboardData = async () => {
     recentActivities,
     pendingItems,
     chartData,
-    stagesDonut,
+    repartitionStages,
     audiencesStats,
+    aTraiter,
+    stagesParDirection,
+    stagesBientotTermines,
   };
 };
 
@@ -428,7 +504,10 @@ module.exports = {
   getRecentActivities,
   getPendingItems,
   getChartData,
-  getStagesDonut,
+  getRepartitionStages,
   getAudiencesStats,
+  getATraiter,
+  getStagesParDirection,
+  getStagesBientotTermines,
   getDashboardData
 };

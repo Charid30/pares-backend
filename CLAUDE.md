@@ -165,6 +165,11 @@ pares-frontend/src/features/dashboard/
   Le job n'active (ACCEPTE → EN_COURS) **que les stages ayant une convention**.
 - Compteurs / statistiques / tableaux de bord : les **demandes** ne comptent que les stages racines
   (`stage_parent_idstage: null`) ; « en cours » compte tous les stagiaires réellement en stage (renouvellements inclus).
+- **Tableau de bord admin** (design Bento, 2026-10-31) : `dashboard.service.js` → `aTraiter` (tous les dossiers qui
+  attendent une action ; une demande à examiner = En attente **ou** En traitement, car le passage est automatique après
+  1 h), `stagesParDirection`, `stagesBientotTermines`. Taux de validation = acceptées / décidées (acceptée = convention
+  jointe, y compris expirée ou terminée ; les demandes en attente ne comptent pas). Nouveau statut de stage → l'ajouter
+  à `STATUTS_ACCEPTES` ou à `getRepartitionStages`. `/admin/stages?statut=…` ouvre la liste filtrée.
 
 ## Règles métier : renouvellement (validées le 2026-10-14)
 
