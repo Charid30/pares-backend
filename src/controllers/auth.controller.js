@@ -1,5 +1,6 @@
 // src/controllers/auth.controller.js
 const authService = require('../services/auth.service');
+const auditService = require('../services/audit.service');
 const { success, error } = require('../utils/response.util');
 const env = require('../config/env');
 const { generate, TOKEN_TTL_MS } = require('../utils/formTokenStore');
@@ -22,6 +23,15 @@ const COOKIE_REMEMBER_MS = 24 * 60 * 60 * 1000; // 24h  — "se souvenir de moi"
 const register = async (req, res) => {
   try {
     const result = await authService.register(req.body);
+    // Garder l'adresse IP de chaque inscription (journal d'audit, module CANDIDAT)
+    await auditService.log({
+      agentNom: result.user.username,
+      action:   'CANDIDAT_INSCRIT',
+      module:   'CANDIDAT',
+      entityId: result.candidat.idcandidats,
+      details:  { objet: 'Inscription', nom: result.candidat.nom, prenom: result.candidat.prenom },
+      ip:       req.ip,
+    });
     // Inscription → session normale (8h)
     res.cookie('token', result.token, { ...baseCookieOptions, maxAge: COOKIE_DEFAULT_MS });
     return success(res, result, 'Inscription réussie', 201);

@@ -5,6 +5,7 @@ const { resetDb } = require('../../__tests__/helpers/testDb');
 const { generateToken } = require('../../utils/jwt.util');
 const { addToBlacklist } = require('../../utils/tokenBlacklist');
 const { authenticate } = require('../auth.middleware');
+const { Role, User } = require('../../models');
 
 const mockRes = () => ({
   status: jest.fn().mockReturnThis(),
@@ -13,6 +14,10 @@ const mockRes = () => ({
 
 beforeEach(async () => {
   await resetDb();
+  const role = await Role.create({ accronyme: 'AGENT', description: 'Agent' });
+  for (const idusers of [1, 2, 3, 4]) {
+    await User.create({ idusers, username: `compte${idusers}`, password: 'motdepasse123', role_idrole: role.idrole });
+  }
 });
 
 describe('authenticate', () => {
@@ -73,6 +78,32 @@ describe('authenticate', () => {
 
     expect(req.user.roles).toEqual(['STAGE_MANAGER', 'AGENT']);
     expect(req.user.roleIds).toEqual([10, 20]);
+  });
+
+  test('refuse le token d\'un compte supprimé après la connexion', async () => {
+    const token = generateToken({ id: 1, username: 'supprime', role: 'CANDIDAT' });
+    await User.update({ del: 1 }, { where: { idusers: 1 } });
+
+    const req = { headers: { authorization: `Bearer ${token}` } };
+    const res = mockRes();
+    const next = jest.fn();
+
+    await authenticate(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+  });
+
+  test('refuse le token d\'un compte qui n\'existe pas', async () => {
+    const token = generateToken({ id: 999, username: 'inconnu', role: 'ADMIN' });
+    const req = { headers: { authorization: `Bearer ${token}` } };
+    const res = mockRes();
+    const next = jest.fn();
+
+    await authenticate(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
   });
 
   test('refuse un token révoqué (blacklisté à la déconnexion)', async () => {

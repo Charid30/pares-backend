@@ -1,7 +1,7 @@
 // src/middlewares/auth.middleware.js
 const { verifyToken } = require('../utils/jwt.util');
 const { error } = require('../utils/response.util');
-const { Permission } = require('../models');
+const { Permission, User } = require('../models');
 const { isBlacklisted } = require('../utils/tokenBlacklist');
 
 // Seul ADMIN bypass la vérification de permissions (accès total)
@@ -72,6 +72,12 @@ const authenticate = async (req, res, next) => {
     const decoded = verifyToken(token);
 
     if (!decoded) {
+      return error(res, 'Token invalide ou expiré', 401);
+    }
+
+    // Un compte supprimé perd sa session aussitôt, sans attendre l'expiration du token
+    const compte = await User.findByPk(decoded.id, { attributes: ['del'] });
+    if (!compte || compte.del) {
       return error(res, 'Token invalide ou expiré', 401);
     }
 
