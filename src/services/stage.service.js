@@ -1860,6 +1860,13 @@ const getAllRapports = async (filters = {}) => {
           },
         ],
       },
+      {
+        model: DocumentStage,
+        as: 'attestations',
+        required: false,
+        where: { typeDocument: 'ATTESTATION', del: 0 },
+        attributes: ['iddocument', 'document_filename', 'numeroAttestation', 'dateEmission'],
+      },
     ],
     order: [['createdDate', 'DESC']],
   });
@@ -2014,7 +2021,7 @@ const downloadRapport = async (id, user = null) => {
 /**
  * Créer un document de stage (convention ou attestation)
  */
-const createDocumentStage = async (agentId, data, file) => {
+const createDocumentStage = async (agentId, data, file, agentContext = null) => {
   if (!file) {
     throw new Error('Le fichier PDF est requis');
   }
@@ -2036,13 +2043,17 @@ const createDocumentStage = async (agentId, data, file) => {
   }
 
   // Si c'est une attestation, vérifier que le rapport existe et est validé
+  let attestationExistante = null;
   if (data.typeDocument === 'ATTESTATION') {
+    await assertAgentOwnsDirection(agentContext, stage.direction_iddirection);
+
     if (!data.rapport_idrapport) {
       throw new Error('Rapport non trouvé ou non validé');
     }
     const rapport = await RapportStage.findOne({
       where: {
         idrapport: data.rapport_idrapport,
+        stage_idstage: data.stage_idstage,
         statusRapport: 'VALIDE',
         del: 0,
       },
@@ -2051,9 +2062,24 @@ const createDocumentStage = async (agentId, data, file) => {
     if (!rapport) {
       throw new Error('Rapport non trouvé ou non validé');
     }
+
+    attestationExistante = await DocumentStage.findOne({
+      where: { rapport_idrapport: rapport.idrapport, typeDocument: 'ATTESTATION', del: 0 },
+    });
+
+    // numeroAttestation est unique en base (lignes supprimées comprises)
+    if (data.numeroAttestation) {
+      const numeroPris = await DocumentStage.findOne({
+        where: { numeroAttestation: data.numeroAttestation },
+        attributes: ['iddocument'],
+      });
+      if (numeroPris && numeroPris.iddocument !== attestationExistante?.iddocument) {
+        throw new Error('Ce numéro d\'attestation est déjà utilisé');
+      }
+    }
   }
 
-  const document = await DocumentStage.create({
+  const champsDocument = {
     stage_idstage: data.stage_idstage,
     rapport_idrapport: data.rapport_idrapport || null,
     agents_idagents: agentId,
@@ -2068,7 +2094,12 @@ const createDocumentStage = async (agentId, data, file) => {
     emetteurFonction: data.emetteurFonction || null,
     dateEmission: data.dateEmission,
     dateExpiration: data.dateExpiration || null,
-  });
+  };
+
+  // Une seule attestation par rapport : remplacer met à jour la ligne existante
+  const document = attestationExistante
+    ? await attestationExistante.update(champsDocument)
+    : await DocumentStage.create(champsDocument);
 
   // Quand une convention est jointe à un stage accepté → EN_COURS si la date de début
   // est atteinte, sinon il reste ACCEPTE jusqu'au jour J (activé par le cron)

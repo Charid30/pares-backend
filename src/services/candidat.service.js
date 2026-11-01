@@ -259,6 +259,7 @@ const getAttestationStage = async (candidatId, documentId) => {
       {
         model: RapportStage,
         as: 'rapport',
+        required: true,
         include: [
           {
             model: Stage,
@@ -279,7 +280,7 @@ const getAttestationStage = async (candidatId, documentId) => {
 
   return {
     filename: document.document_filename,
-    data: document.document,
+    data: fileStorage.readFile(document.document_path, document.document),
     size: document.document_size,
   };
 };

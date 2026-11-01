@@ -225,6 +225,13 @@ pares-frontend/src/features/dashboard/
   table `autorisation_rapport_stage` (migration `migration_prod_autorisation_rapport.sql`) — même principe que
   l'autorisation de renouvellement ; le candidat peut alors soumettre à tout moment. Une soumission anticipée
   n'interrompt pas un stage encore en cours : seuls les stages finis passent RAPPORT_SOUMIS.
+- **Attestation de stage (2026-10-31)** : PDF signé (1 Mo max.), **numéro** (unique) et **date d'émission** obligatoires, joint
+  seulement sur un rapport **VALIDE** (`POST /stages/documents`). Bouton « Joindre l'attestation » sur chaque ligne de
+  l'écran Rapports (admin et agent) : un rapport soumis passe d'abord par la fenêtre de validation, qui demande
+  l'attestation. **Une seule attestation par rapport** : remplacer met à jour la même ligne de `document_stage`.
+  Droits : admin, ou agent avec STAGE/ATTESTER ou CREER, cloisonné par direction sauf rôle à lecture globale.
+  Le rôle SOUS_ADMIN RH a ATTESTER (`migration_prod_permission_attester_rh.sql`) : les agents RH joignent depuis l'écran
+  Rapports ou « Stage (Vue globale) » → « Stage Terminé », pour toutes les directions.
 
 ---
 

@@ -647,8 +647,13 @@ const createDocumentStage = async (req, res) => {
       }
     }
 
+    const agentContext = getAgentContext(req.user);
+    if (!agentContext.isSystemRole && await hasGlobalActionAccess(req.user, 'STAGE', ['CREER', 'ATTESTER'])) {
+      agentContext.isSystemRole = true;
+    }
+
     const agentId = req.user.agentId || null;
-    const document = await stageService.createDocumentStage(agentId, req.body, req.file);
+    const document = await stageService.createDocumentStage(agentId, req.body, req.file, agentContext);
     return success(res, document, 'Document créé avec succès', 201);
   } catch (err) {
     return error(res, err.message, 400);
