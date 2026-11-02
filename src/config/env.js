@@ -35,4 +35,8 @@ module.exports = {
   FRONTEND_URL: process.env.NODE_ENV === 'production'
     ? (process.env.PROD_FRONTEND_URL || 'https://portail.sonabhy.bf')
     : (process.env.FRONTEND_URL      || 'http://localhost:4200'),
+
+  // Captcha Cloudflare Turnstile de l'inscription (inactif sans les deux clés)
+  TURNSTILE_SITE_KEY: process.env.TURNSTILE_SITE_KEY || '',
+  TURNSTILE_SECRET_KEY: process.env.TURNSTILE_SECRET_KEY || '',
 };

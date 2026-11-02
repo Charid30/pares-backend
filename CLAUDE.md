@@ -111,6 +111,14 @@ pares-frontend/src/features/dashboard/
   `PUT /candidat/profil` applique les mêmes règles aux champs **modifiés** (anciens profils non conformes enregistrables).
   `security.middleware.js` bloque aussi les sondes d'injection de gabarit (`${…}`, `#{…}`, `{{…}}`, `<%=`) — compte
   `xalgotest77` (mailinator) d'août 2026. Les champs texte des routes multipart ne passent pas par ce middleware.
+  `registerSchema` supprime tout champ non déclaré (`stripUnknown`) : un nouveau champ d'inscription doit y être ajouté
+  (le genre et le récépissé étaient perdus ainsi jusqu'au 2026-11-02).
+  **Captcha Cloudflare Turnstile** (2026-11-02) : lancé à l'envoi du formulaire, invisible sauf si Cloudflare demande une
+  action (fenêtre `turnstileFenetre`), après le jeton de formulaire côté serveur (`turnstile.middleware.js`), inactif tant que
+  `TURNSTILE_SITE_KEY` et `TURNSTILE_SECRET_KEY` ne sont pas dans le `.env` ; la clé publique arrive au formulaire par
+  `GET /auth/form-token` (`turnstileSiteKey`), donc pas de reconstruction du frontend. Jeton absent ou faux : `403
+  TURNSTILE_REFUSE` ; Cloudflare injoignable : l'inscription passe et `[Turnstile]` est journalisé. Le serveur doit joindre
+  `challenges.cloudflare.com` en sortie.
 
 ### Frontend Angular
 - Respecter la syntaxe du fichier existant : composants admin récents en `@if`/`@for`,

@@ -4,6 +4,7 @@ const auditService = require('../services/audit.service');
 const { success, error } = require('../utils/response.util');
 const env = require('../config/env');
 const { generate, TOKEN_TTL_MS } = require('../utils/formTokenStore');
+const { cleSiteTurnstile } = require('../middlewares/turnstile.middleware');
 
 // Options de base du cookie JWT (HttpOnly — inaccessible depuis JS côté client)
 const baseCookieOptions = {
@@ -133,7 +134,7 @@ const logout = async (req, res) => {
 
 const getFormToken = (req, res) => {
   const token = generate({ ip: req.ip, userAgent: req.get('user-agent') });
-  return success(res, { token, expiresIn: TOKEN_TTL_MS / 1000 }, 'Token généré');
+  return success(res, { token, expiresIn: TOKEN_TTL_MS / 1000, turnstileSiteKey: cleSiteTurnstile() }, 'Token généré');
 };
 
 module.exports = {

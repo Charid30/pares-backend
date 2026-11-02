@@ -71,6 +71,15 @@ const registerSchema = Joi.object({
       'string.pattern.base': NOM_MESSAGE('prénom'),
     }),
 
+  genre: Joi.string()
+    .valid('HOMME', 'FEMME')
+    .required()
+    .messages({
+      'any.required': 'Le genre est requis',
+      'string.empty': 'Le genre est requis',
+      'any.only': 'Le genre doit être Homme ou Femme',
+    }),
+
   email: Joi.string()
     .trim()
     .email()
@@ -80,7 +89,7 @@ const registerSchema = Joi.object({
       'string.empty': 'L\'email est requis',
       'string.email': 'L\'email n\'est pas valide',
     }),
-  
+
   telephone: Joi.string()
     .pattern(TELEPHONE_PATTERN)
     .required()
@@ -109,7 +118,19 @@ const registerSchema = Joi.object({
       'string.pattern.base': 'Le numéro IFU doit contenir 8 chiffres suivis d\'une lettre (ex: 12345678A)',
     }),
 
+  recipisse: Joi.string()
+    .trim()
+    .min(3)
+    .max(50)
+    .allow('', null)
+    .optional()
+    .messages({
+      'string.min': 'Le numéro de récépissé doit contenir au moins 3 caractères',
+      'string.max': 'Le numéro de récépissé ne doit pas dépasser 50 caractères',
+    }),
+
   formToken: Joi.string().optional().allow('', null),
+  turnstileToken: Joi.string().max(2048).optional().allow('', null),
   website: Joi.string().optional().allow('', null),
 })
   .xor('nip', 'passeport')

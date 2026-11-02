@@ -7,6 +7,7 @@ const { authenticate } = require('../middlewares/auth.middleware');
 const { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } = require('../validators/auth.validator');
 const honeypot = require('../middlewares/honeypot.middleware');
 const formToken = require('../middlewares/formToken.middleware');
+const turnstile = require('../middlewares/turnstile.middleware');
 
 /**
  * @route   GET /api/auth/form-token
@@ -19,7 +20,7 @@ router.get('/form-token', authController.getFormToken);
  * @access  Public
  */
 // Jeton vérifié APRÈS la validation : une erreur de saisie ne le consomme pas
-router.post('/register', honeypot, validate(registerSchema), formToken, authController.register);
+router.post('/register', honeypot, validate(registerSchema), formToken, turnstile, authController.register);
 
 /**
  * @route   POST /api/auth/login
