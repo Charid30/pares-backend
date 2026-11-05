@@ -75,7 +75,7 @@ const createAideByCandidat = async (candidatId, data, files) => {
           { label: 'Type', value: data.typeAide },
           { label: 'Titre', value: data.titre },
         ], `${frontUrl}/dashboard/candidat/mes-aides`);
-        await notifService.onNouvelleDemandeAide(candidat, { typeAide: data.typeAide, titre: data.titre });
+        await notifService.onNouvelleDemandeAide(candidat, { typeAide: data.typeAide, titre: data.titre, direction_iddirection: aide.direction_iddirection });
       }
     } catch (e) {
       console.error('❌ Email création aide:', e.message);

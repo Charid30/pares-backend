@@ -192,7 +192,7 @@ const createStage = async (candidatId, data, files) => {
         { label: 'Début souhaité', value: new Date(data.dateDebutSouhaitee).toLocaleDateString('fr-FR') },
       ], `${frontUrl}/dashboard/candidat/mes-stages`);
       // 2. Notification aux agents
-      await notifService.onNouvelleDemandeStage(candidat, data);
+      await notifService.onNouvelleDemandeStage(candidat, { ...data, direction_iddirection: stage.direction_iddirection });
     } catch (e) {
       console.error('❌ Email création stage:', e.message);
     }
@@ -2625,6 +2625,17 @@ const transfererStage = async (stageId, newDirectionId, agentContext) => {
     service_idservice: null,
     lastmodifiedDate: new Date(),
   });
+
+  // Prévenir la nouvelle direction — en arrière-plan, ne doit pas faire attendre la réponse HTTP
+  (async () => {
+    try {
+      const candidat = await Candidat.findByPk(stage.candidats_idcandidats, { attributes: ['nom', 'prenom'] });
+      if (candidat) await notifService.onStageTransfere(candidat, stage, directionExists);
+    } catch (e) {
+      console.error('❌ Notification transfert stage:', e.message);
+    }
+  })();
+
   return stage.reload();
 };
 

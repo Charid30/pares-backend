@@ -75,7 +75,7 @@ const createDemandeByCandidat = async (candidatId, data, file) => {
           { label: 'Date souhaitée', value: new Date(data.dateAudience).toLocaleDateString('fr-FR') },
           { label: 'Heure', value: data.heureAudience },
         ], `${frontUrl}/dashboard/candidat/mes-audiences`);
-        await notifService.onNouvelleDemandeAudience(candidat, { modeSoumission, dateAudience: data.dateAudience, heureAudience: data.heureAudience });
+        await notifService.onNouvelleDemandeAudience(candidat, { modeSoumission, dateAudience: data.dateAudience, heureAudience: data.heureAudience, direction_iddirection: demande.direction_iddirection });
       }
     } catch (e) {
       console.error('❌ Email création audience:', e.message);

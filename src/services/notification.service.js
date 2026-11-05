@@ -1,37 +1,98 @@
 // src/services/notification.service.js
 // Service centralisé : notifications email + in-app (agents + candidats)
-const { AgentNotificationPref, Agent, AgentDirection, Candidat, User, Role, Permission } = require('../models');
+const {
+  AgentNotificationPref, Agent, Candidat, User, Role, Permission, Service, Direction,
+} = require('../models');
 const emailService = require('./email.service');
 const inapp = require('./inapp.service');
+const { getAgentDirectionIds } = require('../utils/agentDirections.util');
 
 // =====================================================
 // NOTIFIER LES AGENTS (email + in-app)
 // =====================================================
 
+// Module de permissions de chaque type de notification
+const MODULE_PAR_TYPE = { STAGE: 'STAGE', OFFRE: 'OFFRE', AIDE: 'AIDE', AUDIENCE: 'DEMANDE_AUDIENCE' };
+
+/** Par rôle : acronyme, lecture globale et actions sur le module. */
+const chargerRolesDuModule = async (module) => {
+  const [roles, permissions] = await Promise.all([
+    Role.findAll({ where: { del: 0 }, attributes: ['idrole', 'accronyme', 'lectureGlobale'] }),
+    Permission.findAll({ where: { module, del: 0 }, attributes: ['role_idrole', 'action'] }),
+  ]);
+  const parRole = new Map(roles.map(r => [r.idrole, { accronyme: r.accronyme, global: !!r.lectureGlobale, actions: new Set() }]));
+  for (const p of permissions) parRole.get(p.role_idrole)?.actions.add(p.action);
+  return parRole;
+};
+
+/** Rôles de l'agent (rôle principal + rôles additionnels de ses comptes). */
+const rolesDeAgent = (agent, parRole) => {
+  const ids = new Set();
+  for (const u of agent.users || []) {
+    if (u.role_idrole) ids.add(u.role_idrole);
+    for (const r of u.additionalRoles || []) ids.add(r.idrole);
+  }
+  return [...ids].map(id => parRole.get(id)).filter(Boolean);
+};
+
 /**
- * Notifier tous les agents qui ont activé un type de notification
- * @param {string} notificationType - STAGE | RECRUTEMENT | OFFRE | AIDE | AUDIENCE
- * @param {string} subject - Sujet de l'email
- * @param {string} html - Contenu HTML de l'email
- * @param {object} inappPayload - { type, titre, message, link } pour la notif in-app
+ * Agents à prévenir pour un dossier, parmi ceux qui ont activé ce type de notification :
+ * - un administrateur reçoit tout ;
+ * - dossier d'une direction : agents de cette direction ayant un droit sur le module (consulter suffit).
+ *   Un rôle à lecture globale ne reçoit que ses propres directions ;
+ * - dossier sans direction : rôles à lecture globale ayant un droit d'action sur le module (seuls agents à le voir).
+ * @param {string} notificationType - STAGE | OFFRE | AIDE | AUDIENCE
+ * @param {number|null} directionId - direction du dossier
  */
-const notifyAgents = async (notificationType, subject, html, inappPayload = null) => {
-  try {
-    const prefs = await AgentNotificationPref.findAll({
+const agentsDestinataires = async (notificationType, directionId = null) => {
+  const [prefs, parRole] = await Promise.all([
+    AgentNotificationPref.findAll({
       where: { notificationType, enabled: 1 },
       include: [{
         model: Agent,
         as: 'agent',
-        where: { del: 0 },
+        where: { del: 0, actif: 1 },
         attributes: ['idagents', 'email', 'nom', 'prenom'],
         required: true,
+        include: [
+          {
+            model: User, as: 'users', attributes: ['idusers', 'role_idrole'], through: { attributes: [] },
+            include: [{ model: Role, as: 'additionalRoles', attributes: ['idrole'], through: { attributes: [] } }],
+          },
+          { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
+          { model: Direction, as: 'directionDirecte' },
+        ],
       }],
-    });
+    }),
+    chargerRolesDuModule(MODULE_PAR_TYPE[notificationType]),
+  ]);
 
-    for (const pref of prefs) {
+  return prefs.map(p => p.agent).filter((agent) => {
+    const roles = rolesDeAgent(agent, parRole);
+    if (roles.some(r => r.accronyme === 'ADMIN')) return true;
+    if (directionId) {
+      return roles.some(r => r.actions.size > 0) && getAgentDirectionIds(agent).includes(directionId);
+    }
+    return roles.some(r => r.global && [...r.actions].some(a => a !== 'CONSULTER'));
+  });
+};
+
+/**
+ * Notifier les agents concernés par un dossier (voir agentsDestinataires)
+ * @param {string} notificationType - STAGE | OFFRE | AIDE | AUDIENCE
+ * @param {string} subject - Sujet de l'email
+ * @param {string} html - Contenu HTML de l'email
+ * @param {object} inappPayload - { type, titre, message, link } pour la notif in-app
+ * @param {number|null} directionId - direction du dossier
+ */
+const notifyAgents = async (notificationType, subject, html, inappPayload = null, directionId = null) => {
+  try {
+    const agents = await agentsDestinataires(notificationType, directionId);
+
+    for (const agent of agents) {
       // Email
       try {
-        await emailService.sendEmail({ to: pref.agent.email, subject, html });
+        await emailService.sendEmail({ to: agent.email, subject, html });
       } catch (e) {
         console.error(`❌ Email agent échoué:`, e.message);
       }
@@ -39,7 +100,7 @@ const notifyAgents = async (notificationType, subject, html, inappPayload = null
       if (inappPayload) {
         await inapp.push({
           recipientType: 'AGENT',
-          recipientId: pref.agent.idagents,
+          recipientId: agent.idagents,
           ...inappPayload,
         });
       }
@@ -332,7 +393,23 @@ const onNouvelleDemandeStage = async (candidat, stage) => {
     titre: 'Nouvelle demande de stage',
     message: `${candidat.prenom} ${candidat.nom} a soumis une demande de stage (${stage.domaineStage}).`,
     link: `${FRONTEND}/dashboard/agent/stages${id ? `?open=${id}` : ''}`,
-  });
+  }, stage.direction_iddirection);
+};
+
+/** Prévenir les agents de la nouvelle direction qu'une demande de stage vient de leur être transférée. */
+const onStageTransfere = async (candidat, stage, direction) => {
+  const nomCandidat = `${candidat.prenom} ${candidat.nom}`;
+  const html = buildAgentNotifHtml('Stage', 'Demande de stage transférée', [
+    { label: 'Candidat', value: nomCandidat },
+    { label: 'Domaine', value: stage.domaineStage },
+    { label: 'Direction', value: direction.accronyme || direction.nom },
+  ]);
+  await notifyAgents('STAGE', 'Demande de stage transférée à votre direction', html, {
+    type: 'STAGE_TRANSFERE',
+    titre: 'Demande de stage transférée',
+    message: `La demande de stage de ${nomCandidat} (${stage.domaineStage}) a été transférée à votre direction.`,
+    link: `${FRONTEND}/dashboard/agent/stages`,
+  }, direction.iddirection);
 };
 
 const onNouvelleDemandeOffre = async (candidat, offre) => {
@@ -348,7 +425,7 @@ const onNouvelleDemandeOffre = async (candidat, offre) => {
     titre: 'Nouvelle demande d\'offre',
     message: `${candidat.prenom} ${candidat.nom} a soumis une demande d'offre : « ${offre.titre} ».`,
     link: `${FRONTEND}/dashboard/agent/offres${id ? `?open=${id}` : ''}`,
-  });
+  }, offre.direction_iddirection);
 };
 
 const onNouvelleDemandeAide = async (candidat, aide) => {
@@ -364,7 +441,7 @@ const onNouvelleDemandeAide = async (candidat, aide) => {
     titre: 'Nouvelle demande d\'aide',
     message: `${candidat.prenom} ${candidat.nom} a soumis une demande d'aide : « ${aide.titre} ».`,
     link: `${FRONTEND}/dashboard/agent/aides${id ? `?open=${id}` : ''}`,
-  });
+  }, aide.direction_iddirection);
 };
 
 const onNouvelleDemandeAudience = async (candidat, demande) => {
@@ -381,7 +458,7 @@ const onNouvelleDemandeAudience = async (candidat, demande) => {
     titre: 'Nouvelle demande d\'audience',
     message: `${candidat.prenom} ${candidat.nom} a demandé une audience pour le ${new Date(demande.dateAudience).toLocaleDateString('fr-FR')}.`,
     link: `${FRONTEND}/dashboard/agent/audiences${id ? `?open=${id}` : ''}`,
-  });
+  }, demande.direction_iddirection);
 };
 
 /**
@@ -628,52 +705,33 @@ const onRenouvellementsAProgrammer = async (renouvellements, automatique = false
 
 // Demande redirigée vers une autre direction (offre, aide, audience) — 2026-11-05
 const REDIRECTION = {
-  OFFRE:    { pref: 'OFFRE',    libelle: 'offre',             candidatId: d => d.candidats_idcandidats, lienAgent: 'offres',    lienCandidat: 'mes-offres',    id: d => d.idoffres },
-  AIDE:     { pref: 'AIDE',     libelle: 'demande d\'aide',     candidatId: d => d.candidats_idcandidats, lienAgent: 'aides',     lienCandidat: 'mes-aides',     id: d => d.idaide },
-  AUDIENCE: { pref: 'AUDIENCE', libelle: 'demande d\'audience', candidatId: d => d.candidats_idcandidats, lienAgent: 'audiences', lienCandidat: 'mes-audiences', id: d => d.iddemande },
-};
-
-/** Directions d'un agent : agents_directions, sinon direction_iddirection (même règle que les listes). */
-const directionsAgent = async (agent) => {
-  const rows = await AgentDirection.findAll({ where: { agent_idagents: agent.idagents }, attributes: ['direction_iddirection'] });
-  if (rows.length) return rows.map(r => r.direction_iddirection);
-  return agent.direction_iddirection ? [agent.direction_iddirection] : [];
+  OFFRE:    { libelle: 'offre',             lienAgent: 'offres',    lienCandidat: 'mes-offres',    id: d => d.idoffres },
+  AIDE:     { libelle: 'demande d\'aide',     lienAgent: 'aides',     lienCandidat: 'mes-aides',     id: d => d.idaide },
+  AUDIENCE: { libelle: 'demande d\'audience', lienAgent: 'audiences', lienCandidat: 'mes-audiences', id: d => d.iddemande },
 };
 
 /**
- * Prévenir les agents de la direction cible (e-mail + in-app, qui déclenche le push) et le candidat
- * (in-app + push) qu'une demande vient d'être redirigée.
+ * Prévenir les agents de la direction cible (agentsDestinataires : e-mail + in-app, qui déclenche le push) et le
+ * candidat (in-app + push) qu'une demande vient d'être redirigée.
  */
 const onDemandeTransferee = async (type, demande, direction) => {
   const cfg = REDIRECTION[type];
-  const candidat = await Candidat.findOne({ where: { idcandidats: cfg.candidatId(demande), del: 0 } });
+  const candidat = await Candidat.findOne({ where: { idcandidats: demande.candidats_idcandidats, del: 0 } });
   const nomCandidat = candidat ? `${candidat.prenom} ${candidat.nom}` : 'Un candidat';
   const nomDirection = direction.accronyme || direction.nom;
   const titre = demande.titre ? ` « ${demande.titre} »` : '';
-
-  const prefs = await AgentNotificationPref.findAll({
-    where: { notificationType: cfg.pref, enabled: 1 },
-    include: [{ model: Agent, as: 'agent', where: { del: 0 }, attributes: ['idagents', 'email', 'direction_iddirection'], required: true }],
-  });
-  const html = buildAgentNotifHtml(type === 'AUDIENCE' ? 'Audience' : type === 'AIDE' ? 'Aide' : 'Offre', `${cfg.libelle[0].toUpperCase()}${cfg.libelle.slice(1)} redirigée vers votre direction`, [
+  const Libelle = `${cfg.libelle[0].toUpperCase()}${cfg.libelle.slice(1)}`;
+  const html = buildAgentNotifHtml(type === 'AUDIENCE' ? 'Audience' : type === 'AIDE' ? 'Aide' : 'Offre', `${Libelle} redirigée vers votre direction`, [
     { label: 'Candidat', value: nomCandidat },
     ...(demande.titre ? [{ label: 'Titre', value: demande.titre }] : []),
     { label: 'Direction', value: nomDirection },
   ]);
-  for (const { agent } of prefs) {
-    if (!(await directionsAgent(agent)).includes(direction.iddirection)) continue;
-    try {
-      await emailService.sendEmail({ to: agent.email, subject: `Une ${cfg.libelle} a été redirigée vers votre direction`, html });
-    } catch (e) {
-      console.error('❌ E-mail redirection:', e.message);
-    }
-    await inapp.push({
-      recipientType: 'AGENT', recipientId: agent.idagents, type: `${type}_REDIRIGEE`,
-      titre: `${cfg.libelle[0].toUpperCase()}${cfg.libelle.slice(1)} redirigée`,
-      message: `La ${cfg.libelle} de ${nomCandidat}${titre} a été redirigée vers votre direction.`,
-      link: `${FRONTEND}/dashboard/agent/${cfg.lienAgent}?open=${cfg.id(demande)}`,
-    });
-  }
+  await notifyAgents(type, `Une ${cfg.libelle} a été redirigée vers votre direction`, html, {
+    type: `${type}_REDIRIGEE`,
+    titre: `${Libelle} redirigée`,
+    message: `La ${cfg.libelle} de ${nomCandidat}${titre} a été redirigée vers votre direction.`,
+    link: `${FRONTEND}/dashboard/agent/${cfg.lienAgent}?open=${cfg.id(demande)}`,
+  }, direction.iddirection);
   if (candidat) {
     await inapp.push({
       recipientType: 'CANDIDAT', recipientId: candidat.idcandidats, type: `${type}_REDIRIGEE`,
@@ -686,6 +744,7 @@ const onDemandeTransferee = async (type, demande, direction) => {
 
 module.exports = {
   onDemandeTransferee,
+  agentsDestinataires,
   notifyAgents,
   onRenouvellementsAProgrammer,
   notifyAdmins,
@@ -695,6 +754,7 @@ module.exports = {
   sendDateRdvEmail,
   sendDocumentARemplacerStage,
   onNouvelleDemandeStage,
+  onStageTransfere,
   onNouvelleDemandeOffre,
   onNouvelleDemandeAide,
   onNouvelleDemandeAudience,

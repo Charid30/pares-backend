@@ -55,6 +55,10 @@ de l'application en place, `npm install`, redémarrage des services. En cas de d
 - **Frontend** : Angular 21 (standalone, zoneless) + Tailwind — `pares-frontend/`
 - **Auth** : JWT. `req.user.agentId` peut être non nul même pour un ADMIN (un admin peut avoir un profil agent).
 - **Notifications** : Web Push (VAPID), emails via `notification.service.js` / `email.service.js`, in-app.
+  **Destinataires agents** (2026-11-01, `agentsDestinataires`, notification.service.js) : préférence active, agent actif, puis :
+  admin → tout ; dossier d'une direction → agents **de cette direction** ayant un droit sur le module (consulter suffit), un rôle
+  à lecture globale ne reçoit que ses propres directions ; dossier sans direction → rôles à lecture globale avec un droit d'action.
+  Vaut pour les nouvelles demandes (stage, offre, aide, audience), le transfert d'un stage (nouvelle direction) et le rappel des aides.
 - **Jobs** : `setInterval` dans `src/jobs/` (ex. `stageStatusJob.js`, toutes les heures).
 
 ```
@@ -135,6 +139,18 @@ pares-frontend/src/features/dashboard/
   un utilisateur qui ouvre l'espace d'un autre profil est renvoyé vers le sien (`AuthService.getDashboardRoute()` :
   ADMIN > CANDIDAT > agent, même règle qu'à la connexion). Les admins ayant aussi un profil agent restent dans l'admin.
 - Toasts : `this.showToast(...)` (`addToast` n'existe pas).
+- **Confirmation et notifications communes** (2026-10-23, demande de l'utilisateur : « pour toute action, demander
+  confirmation d'abord », popups uniques) :
+  - **Avant** toute action qui modifie des données (valider, refuser, supprimer, envoyer, enregistrer, joindre…) :
+    `if (!(await this.confirmService.demander({ titre, message, detail?, confirmer?, danger? }))) return;`
+    (`ConfirmService`, fenêtre `<app-confirm-dialog>` montée une seule fois dans `app.html`), placé **après** les
+    contrôles du formulaire. Pas de `confirm()` du navigateur ni de fenêtre « Supprimer ? » maison.
+    Non concernés : connexion, déconnexion, inscription, mot de passe oublié, notifications lues, consultation,
+    filtres, exports et téléchargements.
+  - **Après** l'action : `ToastService` (`succes`, `erreur`, `avertissement`, `info`), affiché par
+    `<app-toast-container>` (glisse depuis la droite, repart vers la droite). Les méthodes `showToast(...)` existantes
+    y délèguent. Pas de bandeau de succès dans les pages ; les erreurs de **chargement** d'une page et les messages
+    des pages de connexion / inscription restent dans la page.
 - Téléchargements protégés : passer par `HttpClient` (`responseType: 'blob'`) — `window.open(url)` n'envoie pas le JWT.
 - Recherche : la barre « Rechercher… » du header admin diffuse le terme via `SearchService` (`term$`) ;
   les pages s'y abonnent (pas de champ de recherche local).

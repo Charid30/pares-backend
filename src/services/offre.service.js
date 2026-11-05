@@ -76,7 +76,7 @@ const createOffreByCandidat = async (candidatId, data, files) => {
           { label: 'Type', value: data.typeOffre },
           { label: 'Titre', value: data.titre },
         ], `${frontUrl}/dashboard/candidat/mes-offres`);
-        await notifService.onNouvelleDemandeOffre(candidat, { typeOffre: data.typeOffre, titre: data.titre });
+        await notifService.onNouvelleDemandeOffre(candidat, { typeOffre: data.typeOffre, titre: data.titre, direction_iddirection: offre.direction_iddirection });
       }
     } catch (e) {
       console.error('❌ Email création offre:', e.message);

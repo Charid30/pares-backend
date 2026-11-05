@@ -671,8 +671,8 @@ const soumettreDemandeStage = async (candidatId, data, files) => {
       };
       await emailService.sendDemandeStageRecueEmail(candidat, stageForEmail);
       console.log(`📧 Email de confirmation de demande envoyé à ${candidat.email}`);
-      // Notifier les agents ayant la permission STAGE
-      await notifService.onNouvelleDemandeStage(candidat, stageForEmail);
+      // Notifier les agents de la direction ayant la permission STAGE
+      await notifService.onNouvelleDemandeStage(candidat, { ...stageForEmail, direction_iddirection: stage.direction_iddirection });
     } catch (emailError) {
       console.error('❌ Erreur envoi email confirmation demande:', emailError);
     }
