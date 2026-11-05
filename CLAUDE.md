@@ -187,6 +187,24 @@ pares-frontend/src/features/dashboard/
   jointe, y compris expirée ou terminée ; les demandes en attente ne comptent pas). Nouveau statut de stage → l'ajouter
   à `STATUTS_ACCEPTES` ou à `getRepartitionStages`. `/admin/stages?statut=…` ouvre la liste filtrée.
 
+## Règles métier : offres, aides, audiences (validées le 2026-11-05)
+
+- **Direction obligatoire au dépôt** : le candidat choisit la direction concernée (offres et aides comme les audiences ;
+  `direction_iddirection` requis dans `createOffreCandidatSchema` / `createAideCandidatSchema`, `directionChoisie`).
+  Le routage par défaut des offres (`settings.routage.agentDefautOffre`) n'est plus utilisé au dépôt.
+- **Soit on valide, soit on redirige** : avant de valider (offre / aide : Validée ou En traitement ; audience : Acceptée),
+  l'agent voit « Cette demande concerne-t-elle votre direction ? » (`shared/components/direction-concernee`).
+  Oui → la validation continue ; Non → il choisit la direction et la demande y est redirigée **sans être validée**.
+  La permission VALIDER suffit pour cette redirection (sinon TRANSFERER ; MODIFIER garde aussi la redirection des aides).
+- **Redirection seulement avant la décision** : offres et aides En attente / En traitement (En traitement repart
+  **En attente** pour la direction cible), audiences En attente. Validée, rejetée, acceptée, annulée : plus de redirection.
+- Un agent ne valide, rejette ou redirige que les demandes de **ses directions** (`assertAgitSurDirection` ; admin et
+  lecture globale partout ; agent sans direction : aucune restriction, comme la liste).
+- Redirection tracée (`transferePar`, `transfereDate`, aussi sur `offres` depuis `migration_prod_demandes_sans_direction.sql`)
+  et notifiée : agents de la direction cible (e-mail + in-app) et candidat (in-app + push) — `onDemandeTransferee`.
+- Demandes déposées sans direction avant le 2026-11-05 : offres et aides → **CAB**, audiences → **DG**
+  (même migration, statut inchangé, `transferePar = 'Migration demandes sans direction'` pour le retour arrière).
+
 ## Règles métier : renouvellement (validées le 2026-10-14)
 
 - Le renouvellement est la **continuité / prolongation** de la demande de stage : nouveau stage (enfant,

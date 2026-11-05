@@ -320,8 +320,9 @@ const transfererDemande = async (demandeId, newDirectionId, agentId = null, agen
   const demande = await DemandeAudience.findOne({ where: { iddemande: demandeId, del: 0 } });
   if (!demande) throw new Error('Demande introuvable');
 
-  if (demande.status === 'REJETE' || demande.status === 'ANNULE') {
-    throw new Error(`Cette demande ne peut pas être transférée (statut : ${demande.status})`);
+  // Redirection seulement avant la décision (2026-11-05) : une audience acceptée, rejetée ou annulée reste où elle est
+  if (demande.status !== 'EN_ATTENTE') {
+    throw new Error('Une demande d\'audience déjà acceptée, rejetée ou annulée ne peut plus être redirigée');
   }
 
   if (demande.direction_iddirection === newDirectionId) {
@@ -338,6 +339,7 @@ const transfererDemande = async (demandeId, newDirectionId, agentId = null, agen
     transferePar: agentNom ?? null,
     transfereDate: new Date(),
   });
+  notifService.onDemandeTransferee('AUDIENCE', demande, direction).catch(e => console.error('❌ Notification redirection audience:', e.message));
   return demande.reload({
     include: [
       { model: Candidat, as: 'candidat', attributes: ['idcandidats', 'nom', 'prenom', 'telephone', 'email'] },

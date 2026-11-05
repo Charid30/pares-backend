@@ -95,6 +95,24 @@ module.exports = (sequelize) => {
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    transfereParId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'ID de l\'agent ayant redirigé l\'offre vers cette direction',
+    },
+    transferePar: {
+      type: DataTypes.STRING(150),
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Nom de l\'agent ayant redirigé l\'offre (snapshot)',
+    },
+    transfereDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Date de la dernière redirection',
+    },
     dateEntretien: {
       type: DataTypes.DATEONLY,
       allowNull: true,

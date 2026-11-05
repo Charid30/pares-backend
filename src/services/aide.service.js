@@ -15,6 +15,14 @@ const notifService = require('./notification.service');
 // AIDES
 // =====================================================
 
+/** Direction choisie par le candidat au dépôt : obligatoire et existante (même règle que les audiences). */
+const directionChoisie = async (directionId) => {
+  if (!directionId) throw new Error('Veuillez choisir la direction concernée par votre demande');
+  const direction = await Direction.findOne({ where: { iddirection: directionId, del: 0 } });
+  if (!direction) throw new Error('La direction choisie est introuvable');
+  return direction.iddirection;
+};
+
 /**
  * Créer une aide (par candidat)
  */
@@ -37,6 +45,7 @@ const createAideByCandidat = async (candidatId, data, files) => {
     titre: data.titre,
     description: data.description,
     statusAide: 'EN_ATTENTE',
+    direction_iddirection: await directionChoisie(data.direction_iddirection),
   };
   
   // Ajouter les fichiers
@@ -149,9 +158,17 @@ const getAllAides = async (filters = {}, directionIds = null) => {
   });
 };
 
+// Redirection vers une autre direction : seulement avant la décision (2026-11-05). Une demande prise
+// « En traitement » par la direction d'origine repart « En attente » pour que la direction cible la traite.
+const STATUTS_REDIRIGEABLES = ['EN_ATTENTE', 'EN_TRAITEMENT'];
+
 const transfererAide = async (aideId, newDirectionId, agentId = null, agentNom = null) => {
   const aide = await Aide.findOne({ where: { idaide: aideId, del: 0 } });
   if (!aide) throw new Error('Aide introuvable');
+
+  if (!STATUTS_REDIRIGEABLES.includes(aide.statusAide)) {
+    throw new Error('Une demande d\'aide déjà validée ou rejetée ne peut plus être redirigée');
+  }
 
   if (aide.direction_iddirection === newDirectionId) {
     throw new Error('Cette aide est déjà affectée à cette direction');
@@ -162,11 +179,13 @@ const transfererAide = async (aideId, newDirectionId, agentId = null, agentNom =
 
   await aide.update({
     direction_iddirection: newDirectionId,
+    statusAide: 'EN_ATTENTE',
     lastModifiedDate: new Date(),
     transfereParId: agentId ?? null,
     transferePar: agentNom ?? null,
     transfereDate: new Date(),
   });
+  notifService.onDemandeTransferee('AIDE', aide, direction).catch(e => console.error('❌ Notification redirection aide:', e.message));
 
   return aide.reload({
     include: [

@@ -31,6 +31,18 @@ const resolveAgentDirection = async (agentId) => {
   return agent?.direction_iddirection ? [agent.direction_iddirection] : [];
 };
 
+/**
+ * Un agent ne valide, rejette ou redirige que les demandes de ses directions (2026-11-05) ; l'admin et les rôles à
+ * lecture globale partout. Agent sans direction : comme pour la liste, aucune restriction.
+ */
+const assertAgitSurDirection = async (req, directionId) => {
+  if (await hasGlobalReadAccess(req.user)) return;
+  const directionIds = await resolveAgentDirection(req.user.agentId);
+  if (directionIds.length && !directionIds.includes(directionId)) {
+    throw new Error('Cette demande n\'appartient pas à votre direction');
+  }
+};
+
 // =====================================================
 // AIDES
 // =====================================================
@@ -87,6 +99,7 @@ const transfererAide = async (req, res) => {
     const aideId = parseInt(req.params.id);
     const { direction_iddirection } = req.body;
     if (!direction_iddirection) return error(res, 'La direction cible est requise', 400);
+    await assertAgitSurDirection(req, (await aideService.getAideById(aideId)).direction_iddirection);
     const aide = await aideService.transfererAide(
       aideId,
       direction_iddirection,
@@ -173,6 +186,7 @@ const updateAide = async (req, res) => {
  */
 const evaluateAide = async (req, res) => {
   try {
+    await assertAgitSurDirection(req, (await aideService.getAideById(req.params.id)).direction_iddirection);
     const aide = await aideService.evaluateAide(req.params.id, req.body);
     const statusAide = req.body.statusAide || req.body.statut;
     await auditService.log({

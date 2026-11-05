@@ -4,7 +4,7 @@ const router = express.Router();
 const multer = require('multer');
 const aideController = require('../controllers/aide.controller');
 const validate = require('../middlewares/validate.middleware');
-const { authenticate, authorize, authorizeModule, authorizeAction, authorizeCandidatOuModule } = require('../middlewares/auth.middleware');
+const { authenticate, authorize, authorizeModule, authorizeAction, authorizeAnyAction, authorizeCandidatOuModule } = require('../middlewares/auth.middleware');
 const { validatePdfFiles } = require('../middlewares/validateFiles.middleware');
 const {
   createAideCandidatSchema,
@@ -177,7 +177,7 @@ router.put(
 router.put(
   '/:id/transferer',
   authenticate,
-  authorizeAction('AIDE', 'MODIFIER'),
+  authorizeAnyAction('AIDE', ['TRANSFERER', 'MODIFIER', 'VALIDER']),
   aideController.transfererAide
 );
 

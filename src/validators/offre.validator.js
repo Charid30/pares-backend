@@ -5,6 +5,11 @@ const Joi = require('joi');
  * Schéma de validation pour créer une offre (par candidat)
  */
 const createOffreCandidatSchema = Joi.object({
+  // Direction concernée, choisie par le candidat (obligatoire, comme pour les audiences)
+  direction_iddirection: Joi.number().integer().min(1).required().messages({
+    'any.required': 'Veuillez choisir la direction concernée par votre demande',
+    'number.base':  'Veuillez choisir la direction concernée par votre demande',
+  }),
   typeOffre: Joi.string()
     .required()
     .messages({

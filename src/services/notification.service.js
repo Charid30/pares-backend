@@ -1,6 +1,6 @@
 // src/services/notification.service.js
 // Service centralisé : notifications email + in-app (agents + candidats)
-const { AgentNotificationPref, Agent, Candidat, User, Role, Permission } = require('../models');
+const { AgentNotificationPref, Agent, AgentDirection, Candidat, User, Role, Permission } = require('../models');
 const emailService = require('./email.service');
 const inapp = require('./inapp.service');
 
@@ -626,7 +626,66 @@ const onRenouvellementsAProgrammer = async (renouvellements, automatique = false
   }
 };
 
+// Demande redirigée vers une autre direction (offre, aide, audience) — 2026-11-05
+const REDIRECTION = {
+  OFFRE:    { pref: 'OFFRE',    libelle: 'offre',             candidatId: d => d.candidats_idcandidats, lienAgent: 'offres',    lienCandidat: 'mes-offres',    id: d => d.idoffres },
+  AIDE:     { pref: 'AIDE',     libelle: 'demande d\'aide',     candidatId: d => d.candidats_idcandidats, lienAgent: 'aides',     lienCandidat: 'mes-aides',     id: d => d.idaide },
+  AUDIENCE: { pref: 'AUDIENCE', libelle: 'demande d\'audience', candidatId: d => d.candidats_idcandidats, lienAgent: 'audiences', lienCandidat: 'mes-audiences', id: d => d.iddemande },
+};
+
+/** Directions d'un agent : agents_directions, sinon direction_iddirection (même règle que les listes). */
+const directionsAgent = async (agent) => {
+  const rows = await AgentDirection.findAll({ where: { agent_idagents: agent.idagents }, attributes: ['direction_iddirection'] });
+  if (rows.length) return rows.map(r => r.direction_iddirection);
+  return agent.direction_iddirection ? [agent.direction_iddirection] : [];
+};
+
+/**
+ * Prévenir les agents de la direction cible (e-mail + in-app, qui déclenche le push) et le candidat
+ * (in-app + push) qu'une demande vient d'être redirigée.
+ */
+const onDemandeTransferee = async (type, demande, direction) => {
+  const cfg = REDIRECTION[type];
+  const candidat = await Candidat.findOne({ where: { idcandidats: cfg.candidatId(demande), del: 0 } });
+  const nomCandidat = candidat ? `${candidat.prenom} ${candidat.nom}` : 'Un candidat';
+  const nomDirection = direction.accronyme || direction.nom;
+  const titre = demande.titre ? ` « ${demande.titre} »` : '';
+
+  const prefs = await AgentNotificationPref.findAll({
+    where: { notificationType: cfg.pref, enabled: 1 },
+    include: [{ model: Agent, as: 'agent', where: { del: 0 }, attributes: ['idagents', 'email', 'direction_iddirection'], required: true }],
+  });
+  const html = buildAgentNotifHtml(type === 'AUDIENCE' ? 'Audience' : type === 'AIDE' ? 'Aide' : 'Offre', `${cfg.libelle[0].toUpperCase()}${cfg.libelle.slice(1)} redirigée vers votre direction`, [
+    { label: 'Candidat', value: nomCandidat },
+    ...(demande.titre ? [{ label: 'Titre', value: demande.titre }] : []),
+    { label: 'Direction', value: nomDirection },
+  ]);
+  for (const { agent } of prefs) {
+    if (!(await directionsAgent(agent)).includes(direction.iddirection)) continue;
+    try {
+      await emailService.sendEmail({ to: agent.email, subject: `Une ${cfg.libelle} a été redirigée vers votre direction`, html });
+    } catch (e) {
+      console.error('❌ E-mail redirection:', e.message);
+    }
+    await inapp.push({
+      recipientType: 'AGENT', recipientId: agent.idagents, type: `${type}_REDIRIGEE`,
+      titre: `${cfg.libelle[0].toUpperCase()}${cfg.libelle.slice(1)} redirigée`,
+      message: `La ${cfg.libelle} de ${nomCandidat}${titre} a été redirigée vers votre direction.`,
+      link: `${FRONTEND}/dashboard/agent/${cfg.lienAgent}?open=${cfg.id(demande)}`,
+    });
+  }
+  if (candidat) {
+    await inapp.push({
+      recipientType: 'CANDIDAT', recipientId: candidat.idcandidats, type: `${type}_REDIRIGEE`,
+      titre: 'Demande transmise à une autre direction',
+      message: `Votre ${cfg.libelle}${titre} a été transmise à la direction ${nomDirection}, qui va la traiter.`,
+      link: `${FRONTEND}/dashboard/candidat/${cfg.lienCandidat}`,
+    });
+  }
+};
+
 module.exports = {
+  onDemandeTransferee,
   notifyAgents,
   onRenouvellementsAProgrammer,
   notifyAdmins,

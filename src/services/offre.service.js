@@ -16,6 +16,14 @@ const settingsService = require('./settings.service');
 // OFFRES
 // =====================================================
 
+/** Direction choisie par le candidat au dépôt : obligatoire et existante (même règle que les audiences). */
+const directionChoisie = async (directionId) => {
+  if (!directionId) throw new Error('Veuillez choisir la direction concernée par votre demande');
+  const direction = await Direction.findOne({ where: { iddirection: directionId, del: 0 } });
+  if (!direction) throw new Error('La direction choisie est introuvable');
+  return direction.iddirection;
+};
+
 /**
  * Créer une offre (par candidat)
  */
@@ -38,6 +46,7 @@ const createOffreByCandidat = async (candidatId, data, files) => {
     titre: data.titre,
     description: data.description,
     statusOffre: 'EN_ATTENTE',
+    direction_iddirection: await directionChoisie(data.direction_iddirection),
   };
   
   // Ajouter les fichiers
@@ -53,15 +62,6 @@ const createOffreByCandidat = async (candidatId, data, files) => {
     offreData.demandeOffre = null;
     offreData.demandeOffre_filename = files.demandeOffre[0].originalname;
     offreData.demandeOffre_size = files.demandeOffre[0].size;
-  }
-
-  // Auto-affecter la direction de l'agent par défaut si configuré
-  try {
-    const settings = await settingsService.getSettings();
-    const dirId = await settingsService.resolveDefaultAgentDirection(settings.routage?.agentDefautOffre);
-    if (dirId) offreData.direction_iddirection = dirId;
-  } catch (e) {
-    console.error('⚠️ Routage offre: impossible de résoudre l\'agent par défaut:', e.message);
   }
 
   const offre = await Offre.create(offreData);
@@ -485,13 +485,16 @@ const getCandidaturesByOffre = async (offreId) => {
 /**
  * Transférer une offre vers une autre direction
  */
-const transfererOffre = async (offreId, newDirectionId) => {
+// Redirection vers une autre direction : seulement avant la décision (2026-11-05). Une demande prise
+// « En traitement » par la direction d'origine repart « En attente » pour que la direction cible la traite.
+const STATUTS_REDIRIGEABLES = ['EN_ATTENTE', 'EN_TRAITEMENT'];
+
+const transfererOffre = async (offreId, newDirectionId, agentId = null, agentNom = null) => {
   const offre = await Offre.findOne({ where: { idoffres: offreId, del: 0 } });
   if (!offre) throw new Error('Offre non trouvée');
 
-  const STATUTS_NON_TRANSFERABLES = ['REJETEE', 'CLOTUREE'];
-  if (STATUTS_NON_TRANSFERABLES.includes(offre.statusOffre)) {
-    throw new Error(`Cette offre ne peut pas être transférée (statut : ${offre.statusOffre})`);
+  if (!STATUTS_REDIRIGEABLES.includes(offre.statusOffre)) {
+    throw new Error('Une offre déjà validée ou rejetée ne peut plus être redirigée');
   }
 
   if (offre.direction_iddirection === newDirectionId) {
@@ -501,7 +504,15 @@ const transfererOffre = async (offreId, newDirectionId) => {
   const direction = await Direction.findOne({ where: { iddirection: newDirectionId, del: 0 } });
   if (!direction) throw new Error('Direction non trouvée');
 
-  await offre.update({ direction_iddirection: newDirectionId, lastModifiedDate: new Date() });
+  await offre.update({
+    direction_iddirection: newDirectionId,
+    statusOffre: 'EN_ATTENTE',
+    lastModifiedDate: new Date(),
+    transfereParId: agentId ?? null,
+    transferePar: agentNom ?? null,
+    transfereDate: new Date(),
+  });
+  notifService.onDemandeTransferee('OFFRE', offre, direction).catch(e => console.error('❌ Notification redirection offre:', e.message));
   return offre.reload({
     include: [
       { model: Candidat, as: 'candidatCreateur', attributes: ['idcandidats', 'nom', 'prenom', 'email'], required: false },

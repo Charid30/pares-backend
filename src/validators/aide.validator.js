@@ -5,6 +5,11 @@ const Joi = require('joi');
  * Schéma de validation pour créer une aide (par candidat)
  */
 const createAideCandidatSchema = Joi.object({
+  // Direction concernée, choisie par le candidat (obligatoire, comme pour les audiences)
+  direction_iddirection: Joi.number().integer().min(1).required().messages({
+    'any.required': 'Veuillez choisir la direction concernée par votre demande',
+    'number.base':  'Veuillez choisir la direction concernée par votre demande',
+  }),
   typeAide: Joi.string()
     .required()
     .messages({

@@ -30,6 +30,18 @@ const resolveAgentDirection = async (agentId) => {
   return agent?.direction_iddirection ? [agent.direction_iddirection] : [];
 };
 
+/**
+ * Un agent ne valide, rejette ou redirige que les demandes de ses directions (2026-11-05) ; l'admin et les rôles à
+ * lecture globale partout. Agent sans direction : comme pour la liste, aucune restriction.
+ */
+const assertAgitSurDirection = async (req, directionId) => {
+  if (await hasGlobalReadAccess(req.user)) return;
+  const directionIds = await resolveAgentDirection(req.user.agentId);
+  if (directionIds.length && !directionIds.includes(directionId)) {
+    throw new Error('Cette demande n\'appartient pas à votre direction');
+  }
+};
+
 // =====================================================
 // OFFRES
 // =====================================================
@@ -141,6 +153,7 @@ const updateOffre = async (req, res) => {
  */
 const evaluateOffre = async (req, res) => {
   try {
+    await assertAgitSurDirection(req, (await offreService.getOffreById(req.params.id)).direction_iddirection);
     const offre = await offreService.evaluateOffre(req.params.id, req.body);
     const statusOffre = req.body.statusOffre || req.body.statut;
     await auditService.log({
@@ -401,7 +414,8 @@ const transfererOffre = async (req, res) => {
     const offreId = parseInt(req.params.id);
     const { direction_iddirection } = req.body;
     if (!direction_iddirection) return error(res, 'La direction cible est requise', 400);
-    const offre = await offreService.transfererOffre(offreId, direction_iddirection);
+    await assertAgitSurDirection(req, (await offreService.getOffreById(offreId)).direction_iddirection);
+    const offre = await offreService.transfererOffre(offreId, direction_iddirection, req.user?.agentId ?? null, req.user?.username ?? null);
     await auditService.log({
       agentId:  req.user?.agentId,
       agentNom: req.user?.username,

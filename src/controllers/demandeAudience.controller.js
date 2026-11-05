@@ -1,7 +1,7 @@
 // src/controllers/demandeAudience.controller.js
 const demandeAudienceService = require('../services/demandeAudience.service');
 const auditService = require('../services/audit.service');
-const { Agent, AgentDirection, Role, Permission } = require('../models');
+const { Agent, AgentDirection, Role, Permission, DemandeAudience } = require('../models');
 const { Op } = require('sequelize');
 
 const getUserRoles = (user) =>
@@ -27,6 +27,18 @@ const resolveAgentDirection = async (agentId) => {
   if (rows.length > 0) return rows.map(r => r.direction_iddirection);
   const agent = await Agent.findOne({ where: { idagents: agentId, del: 0 }, attributes: ['direction_iddirection'] });
   return agent?.direction_iddirection ? [agent.direction_iddirection] : [];
+};
+
+/**
+ * Un agent ne valide, rejette ou redirige que les demandes de ses directions (2026-11-05) ; l'admin et les rôles à
+ * lecture globale partout. Agent sans direction : comme pour la liste, aucune restriction.
+ */
+const assertAgitSurDirection = async (req, directionId) => {
+  if (await hasGlobalReadAccess(req.user)) return;
+  const directionIds = await resolveAgentDirection(req.user.agentId);
+  if (directionIds.length && !directionIds.includes(directionId)) {
+    throw new Error('Cette demande n\'appartient pas à votre direction');
+  }
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -139,6 +151,9 @@ const updateStatut = async (req, res) => {
     const demandeId = parseInt(req.params.id);
     const { status, commentaireAdmin, dateAudienceConfirmee, heureAudienceConfirmee } = req.body;
     if (!status) return error(res, 'Le statut est requis', 400);
+    const actuelle = await DemandeAudience.findOne({ where: { iddemande: demandeId, del: 0 }, attributes: ['direction_iddirection'] });
+    if (!actuelle) return error(res, 'Demande introuvable', 404);
+    await assertAgitSurDirection(req, actuelle.direction_iddirection);
     const demande = await demandeAudienceService.updateStatut(
       demandeId, status, commentaireAdmin,
       dateAudienceConfirmee || null, heureAudienceConfirmee || null
@@ -347,6 +362,9 @@ const transfererDemande = async (req, res) => {
     const demandeId = parseInt(req.params.id);
     const { direction_iddirection } = req.body;
     if (!direction_iddirection) return error(res, 'La direction cible est requise', 400);
+    const actuelle = await DemandeAudience.findOne({ where: { iddemande: demandeId, del: 0 }, attributes: ['direction_iddirection'] });
+    if (!actuelle) return error(res, 'Demande introuvable', 404);
+    await assertAgitSurDirection(req, actuelle.direction_iddirection);
     const demande = await demandeAudienceService.transfererDemande(
       demandeId,
       direction_iddirection,

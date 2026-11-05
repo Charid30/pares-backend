@@ -4,7 +4,7 @@ const router = express.Router();
 const multer = require('multer');
 const offreController = require('../controllers/offre.controller');
 const validate = require('../middlewares/validate.middleware');
-const { authenticate, authorize, authorizeModule, authorizeAction, authorizeCandidatOuModule } = require('../middlewares/auth.middleware');
+const { authenticate, authorize, authorizeModule, authorizeAction, authorizeAnyAction, authorizeCandidatOuModule } = require('../middlewares/auth.middleware');
 const { validatePdfFiles } = require('../middlewares/validateFiles.middleware');
 const {
   createOffreCandidatSchema,
@@ -177,7 +177,7 @@ router.put(
 router.put(
   '/:id/transferer',
   authenticate,
-  authorizeAction('OFFRE', 'TRANSFERER'),
+  authorizeAnyAction('OFFRE', ['TRANSFERER', 'VALIDER']),
   offreController.transfererOffre
 );
 

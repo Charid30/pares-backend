@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 
-const { authenticate, authorize, authorizeModule, authorizeAction } = require('../middlewares/auth.middleware');
+const { authenticate, authorize, authorizeModule, authorizeAction, authorizeAnyAction } = require('../middlewares/auth.middleware');
 const { validatePdfFiles } = require('../middlewares/validateFiles.middleware');
 const demandeAudienceController = require('../controllers/demandeAudience.controller');
 
@@ -84,7 +84,7 @@ router.put(
 router.put(
   '/:id/transferer',
   authenticate,
-  authorizeAction('DEMANDE_AUDIENCE', 'TRANSFERER'),
+  authorizeAnyAction('DEMANDE_AUDIENCE', ['TRANSFERER', 'VALIDER']),
   demandeAudienceController.transfererDemande
 );
 
