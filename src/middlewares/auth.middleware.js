@@ -115,9 +115,9 @@ const authenticate = async (req, res, next) => {
  * @param {Array} allowedRoles - Liste des rôles autorisés
  * Supporte: authorize('ADMIN', 'USER') ou authorize(['ADMIN', 'USER'])
  */
-const authorize = (allowedRoles) => {
-  // Si c'est un tableau, l'utiliser directement, sinon créer un tableau
-  const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+const authorize = (...allowedRoles) => {
+  // authorize('ADMIN'), authorize('ADMIN', 'AGENT_RH') ou authorize(['ADMIN', 'AGENT_RH'])
+  const roles = allowedRoles.flat();
 
   return (req, res, next) => {
     if (!req.user) {
@@ -241,4 +241,18 @@ const authorizeActionSurStage = (action) => async (req, res, next) => {
   return authorizeAction(req.permissionModule, action)(req, res, next);
 };
 
-module.exports = { extractToken, authenticate, authorize, authorizeModule, authorizeAction, authorizeAnyAction, authorizeActionSurStage };
+/**
+ * Lecture d'un dossier par son numéro (aide, offre, candidature) : un candidat passe et le contrôleur vérifie
+ * que le dossier est le sien (req.candidatSeul) ; tout autre compte doit avoir une permission sur le module.
+ * Sans ce contrôle, n'importe quel compte lisait les dossiers des autres en changeant le numéro (audit 2026-11-04).
+ */
+const authorizeCandidatOuModule = (module) => (req, res, next) => {
+  if (!req.user) return error(res, 'Non authentifié', 401);
+  if (userRoles(req).includes('CANDIDAT') && !req.user.agentId) {
+    req.candidatSeul = true;
+    return next();
+  }
+  return authorizeModule(module)(req, res, next);
+};
+
+module.exports = { extractToken, authenticate, authorize, authorizeModule, authorizeAction, authorizeAnyAction, authorizeActionSurStage, authorizeCandidatOuModule };

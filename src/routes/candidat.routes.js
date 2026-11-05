@@ -33,6 +33,12 @@ router.use(authorize('CANDIDAT'));
 router.get('/profil', candidatController.getProfil);
 
 /**
+ * GET /api/candidat/stats
+ * Chiffres du profil : demandes de stage (total, validées, en attente)
+ */
+router.get('/stats', candidatController.getStats);
+
+/**
  * PUT /api/candidat/profil
  * Mettre à jour le profil du candidat
  */

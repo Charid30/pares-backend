@@ -146,6 +146,8 @@ const getMesAides = async (req, res) => {
 const getAideById = async (req, res) => {
   try {
     const aide = await aideService.getAideById(req.params.id);
+    // Un candidat ne lit que ses propres demandes (authorizeCandidatOuModule)
+    if (req.candidatSeul && aide.candidats_idcandidats !== req.user.candidatId) return error(res, 'Aide non trouvée', 404);
     return success(res, aide, 'Aide récupérée avec succès');
   } catch (err) {
     return error(res, err.message, 404);
@@ -279,6 +281,7 @@ const getMesCandidatures = async (req, res) => {
 const getCandidatureById = async (req, res) => {
   try {
     const candidature = await aideService.getCandidatureById(req.params.id);
+    if (req.candidatSeul && candidature.candidats_idcandidats !== req.user.candidatId) return error(res, 'Candidature non trouvée', 404);
     return success(res, candidature, 'Candidature récupérée avec succès');
   } catch (err) {
     return error(res, err.message, 404);

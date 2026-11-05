@@ -4,7 +4,7 @@ const router = express.Router();
 const multer = require('multer');
 const aideController = require('../controllers/aide.controller');
 const validate = require('../middlewares/validate.middleware');
-const { authenticate, authorize, authorizeModule, authorizeAction } = require('../middlewares/auth.middleware');
+const { authenticate, authorize, authorizeModule, authorizeAction, authorizeCandidatOuModule } = require('../middlewares/auth.middleware');
 const { validatePdfFiles } = require('../middlewares/validateFiles.middleware');
 const {
   createAideCandidatSchema,
@@ -127,6 +127,7 @@ router.get(
 router.get(
   '/:id',
   authenticate,
+  authorizeCandidatOuModule('AIDE'),
   aideController.getAideById
 );
 
@@ -234,6 +235,7 @@ router.get(
 router.get(
   '/candidatures/:id',
   authenticate,
+  authorizeCandidatOuModule('AIDE'),
   aideController.getCandidatureById
 );
 

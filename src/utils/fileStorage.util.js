@@ -92,7 +92,8 @@ const readFile = (relPath, blobData) => {
  */
 const deleteFile = (relPath) => {
   if (!relPath) return;
-  const absPath = path.join(__dirname, '..', '..', relPath);
+  const absPath = path.resolve(__dirname, '..', '..', relPath);
+  if (!absPath.startsWith(UPLOADS_ROOT + path.sep)) return;   // jamais en dehors de uploads/
   try { fs.unlinkSync(absPath); } catch (_) {}
 };
 

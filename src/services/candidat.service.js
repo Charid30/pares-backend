@@ -305,6 +305,22 @@ const uploadDocumentCandidat = async (candidatId, fileData) => {
  * Récupérer les demandes de stage du candidat
  * Met à jour automatiquement les statuts basés sur les dates effectives
  */
+/**
+ * Chiffres du profil candidat : ses demandes de stage (renouvellements non comptés, comme les tableaux de bord).
+ * Validée = convention jointe (même liste que dashboard.service) ; en attente = pas encore de décision.
+ */
+const STATS_VALIDEES = ['ACCEPTE', 'EN_COURS', 'SUSPENDU', 'EXPIRE', 'RAPPORT_SOUMIS', 'TERMINE'];
+const STATS_EN_ATTENTE = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'];
+const getStatsCandidat = async (candidatId) => {
+  const base = { candidats_idcandidats: candidatId, stage_parent_idstage: null, del: 0 };
+  const [totalCandidatures, candidaturesValidees, candidaturesEnAttente] = await Promise.all([
+    Stage.count({ where: base }),
+    Stage.count({ where: { ...base, statusStage: { [Op.in]: STATS_VALIDEES } } }),
+    Stage.count({ where: { ...base, statusStage: { [Op.in]: STATS_EN_ATTENTE } } }),
+  ]);
+  return { totalCandidatures, candidaturesValidees, candidaturesEnAttente };
+};
+
 const getMesDemandesStage = async (candidatId) => {
   const now = new Date();
 
@@ -1253,6 +1269,7 @@ const getMesRenouvellements = async (candidatId) => {
 };
 
 module.exports = {
+  getStatsCandidat,
   // Profil
   getProfilCandidat,
   updateProfilCandidat,

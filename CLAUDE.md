@@ -102,6 +102,14 @@ pares-frontend/src/features/dashboard/
   `up(connection, { uploadsRoot, log })` — réservé aux opérations qui touchent les fichiers déposés.
   Test sur une copie : `DB_NAME=pares_db_test MIGRATION_UPLOADS_ROOT=<copie de uploads> node scripts/run-migrations.js`.
 - Upload d'un document de stage (`POST /stages/documents`) : **`dateEmission` est obligatoire**.
+- **Lecture d'un dossier par son numéro (audit 2026-11-04)** : fiche, pièces, convention et rapport d'un stage
+  (`GET /stages/:id`, `/:id/documents/:type`, `/:id/convention`, `/rapports/:id`…) passent par
+  `buildDocumentStageAccess` + `assertLectureStage` : candidat = ses stages, agent = permission STAGE ou RENOUVELLEMENT
+  **et** ses directions (sauf lecture globale), admin = tout. Aides, offres et candidatures (`GET /aides/:id`,
+  `/aides/candidatures/:id`, idem offres) : `authorizeCandidatOuModule` (candidat = les siennes, sinon permission du module).
+  Toute nouvelle route de lecture par numéro doit faire de même. `authorize('ADMIN', 'AGENT_RH')` accepte plusieurs rôles.
+- Explorateur SQL de l'admin : **lecture seule** (SELECT / SHOW / DESCRIBE / EXPLAIN, une requête, sans commentaire),
+  colonnes secrètes refusées et masquées. Les corrections de données restent des migrations.
 - **Inscription (sécurité, 2026-10-22)** : `POST /auth/register` = honeypot → `validate(registerSchema)` → jeton de
   formulaire (`formTokenStore`) : **15 min**, lié à l'IP + navigateur, refusé moins de 15 s après sa délivrance
   (`FORM_TOKEN_TROP_RAPIDE` + `retryAfter`), consommé seulement s'il est accepté. Le formulaire le renouvelle toutes

@@ -25,8 +25,20 @@ const apiKeyRoutes = require('./apiKey.routes');
 const externalRoutes = require('./external.routes');
 const pushRoutes = require('./push.routes');
 const adminDbExplorerRoutes = require('./admin-db-explorer.routes');
+const { authenticate, authorize } = require('../middlewares/auth.middleware');
+const { sequelize } = require('../models');
 
 // Utiliser les routes
+// État du serveur et de la base, pour l'écran Paramètres (admin seulement : rien n'est exposé au public)
+router.get('/health', authenticate, authorize('ADMIN'), async (req, res) => {
+  try {
+    await sequelize.authenticate();
+    return res.json({ success: true, data: { api: 'OK', db: 'OK', uptime: Math.round(process.uptime()) } });
+  } catch (err) {
+    return res.status(503).json({ success: false, data: { api: 'OK', db: 'ERROR' }, message: 'Base de données injoignable' });
+  }
+});
+
 router.use('/auth', authRoutes);
 router.use('/stages', stageRoutes);
 router.use('/offres', offreRoutes);

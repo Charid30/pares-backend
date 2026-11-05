@@ -4,6 +4,28 @@ const auditService = require('../services/audit.service');
 
 const MAX_ROWS = 300;
 const IS_SELECT = /^\s*SELECT\b/i;
+// Lecture seule (audit 2026-11-04) : avant, UPDATE / DELETE / DROP passaient aussi. Les corrections de données
+// passent par des migrations (CLAUDE.md), jamais par cet écran.
+const LECTURE = /^\s*(SELECT|SHOW|DESCRIBE|DESC|EXPLAIN)\b/i;
+const INTERDIT = /\b(INTO\s+(OUT|DUMP)FILE|LOAD_FILE|SLEEP|BENCHMARK|FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|GET_LOCK)\b/i;
+const SECRET = /\b(password|token|secret|key_hash|p256dh|auth_key)\b/i;
+
+/** Message d'erreur si la requête n'est pas une lecture simple, sinon null. */
+const refuserRequete = (requete) => {
+  if (!LECTURE.test(requete)) return 'Seules les requêtes de lecture sont autorisées (SELECT, SHOW, DESCRIBE, EXPLAIN).';
+  if (/\/\*|--|#/.test(requete)) return 'Les commentaires SQL ne sont pas autorisés.';
+  if (requete.includes(';')) return 'Une seule requête à la fois, sans point-virgule.';
+  if (INTERDIT.test(requete)) return 'Cette fonction SQL n\'est pas autorisée.';
+  if (SECRET.test(requete)) return 'Les colonnes secrètes (mots de passe, jetons, clés) ne sont pas consultables.';
+  return null;
+};
+
+/** Masque les colonnes secrètes d'un SELECT * (mots de passe, jetons…). */
+const masquerSecrets = (rows) => rows.map((row) => {
+  const copie = { ...row };
+  for (const cle of Object.keys(copie)) if (/password|token|secret|key_hash|p256dh|auth_key/i.test(cle)) copie[cle] = '••••••';
+  return copie;
+});
 
 const executeQuery = async (req, res) => {
   const { query } = req.body;
@@ -12,7 +34,9 @@ const executeQuery = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Requête SQL requise' });
   }
 
-  const clean = query.trim();
+  const clean = query.trim().replace(/;\s*$/, '');
+  const refus = refuserRequete(clean);
+  if (refus) return res.status(400).json({ success: false, message: refus });
 
   // Ajouter LIMIT si SELECT sans LIMIT
   let finalQuery = clean;
@@ -33,7 +57,7 @@ const executeQuery = async (req, res) => {
       ip: req.ip,
     });
 
-    const rows = Array.isArray(results) ? results : [];
+    const rows = masquerSecrets(Array.isArray(results) ? results : []);
     const affectedRows = metadata?.affectedRows ?? null;
 
     return res.json({
@@ -62,4 +86,4 @@ const getTables = async (req, res) => {
   }
 };
 
-module.exports = { executeQuery, getTables };
+module.exports = { executeQuery, getTables, refuserRequete, masquerSecrets };

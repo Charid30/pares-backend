@@ -637,7 +637,7 @@ const getStagesByCandidat = async (candidatId) => {
  * @param {number} id
  * @param {object|null} user - req.user (pour vérification IDOR si CANDIDAT)
  */
-const getStageById = async (id, user = null) => {
+const getStageById = async (id, access) => {
   const stage = await Stage.findOne({
     where: { idstage: id, del: 0 },
     // Exclure les colonnes BLOB, on garde juste les filenames
@@ -715,10 +715,8 @@ const getStageById = async (id, user = null) => {
     throw new Error('Stage non trouvé');
   }
 
-  // IDOR : un candidat ne peut accéder qu'à ses propres stages
-  if (user && user.role === 'CANDIDAT' && stage.candidats_idcandidats !== user.candidatId) {
-    throw new Error('Stage non trouvé');
-  }
+  // Candidat : ses propres stages ; agent : les directions qu'il gère (buildDocumentStageAccess)
+  await assertLectureStage(access, stage, 'Stage non trouvé');
 
   const stageData = stage.toJSON();
 
@@ -1089,7 +1087,7 @@ const mergeStageDocuments = async (id, user = null) => {
 /**
  * Télécharger un document de stage (CV, CNIB, etc.)
  */
-const downloadStageDocument = async (id, documentType, user = null) => {
+const downloadStageDocument = async (id, documentType, access) => {
   const stage = await Stage.findOne({
     where: { idstage: id, del: 0 },
   });
@@ -1098,10 +1096,8 @@ const downloadStageDocument = async (id, documentType, user = null) => {
     throw new Error('Stage non trouvé');
   }
 
-  // IDOR : un candidat ne peut télécharger que ses propres documents
-  if (user && user.role === 'CANDIDAT' && stage.candidats_idcandidats !== user.candidatId) {
-    throw new Error('Stage non trouvé');
-  }
+  // Pièces du dossier (CNIB, casier judiciaire…) : même règle que la fiche du stage
+  await assertLectureStage(access, stage, 'Stage non trouvé');
   
   const validTypes = ['cv', 'cnib', 'casierJudiciaire', 'lettreMotivation', 'lettreRecommandation', 'dernierDiplome'];
   if (!validTypes.includes(documentType)) {
@@ -1169,14 +1165,9 @@ const remplacerConventionStage = async (stageId, agentId, file, agentContext = n
 /**
  * Telecharger la convention de stage (depuis document_stage)
  */
-const downloadConventionStage = async (stageId, user = null) => {
-  // IDOR : vérifier ownership avant de servir le document
-  if (user && user.role === 'CANDIDAT') {
-    const stage = await Stage.findOne({ where: { idstage: stageId, del: 0 }, attributes: ['candidats_idcandidats'] });
-    if (!stage || stage.candidats_idcandidats !== user.candidatId) {
-      throw new Error('Convention de stage non trouvée');
-    }
-  }
+const downloadConventionStage = async (stageId, access) => {
+  const stage = await Stage.findOne({ where: { idstage: stageId, del: 0 }, attributes: ['candidats_idcandidats', 'direction_iddirection'] });
+  await assertLectureStage(access, stage, 'Convention de stage non trouvée');
 
   const convention = await DocumentStage.findOne({
     where: {
@@ -1895,7 +1886,7 @@ const getAllRapports = async (filters = {}) => {
 /**
  * Obtenir un rapport par ID
  */
-const getRapportById = async (id, user = null) => {
+const getRapportById = async (id, access) => {
   const rapport = await RapportStage.findOne({
     where: { idrapport: id, del: 0 },
     include: [
@@ -1916,13 +1907,7 @@ const getRapportById = async (id, user = null) => {
     throw new Error('Rapport non trouvé');
   }
 
-  // IDOR : un candidat ne peut voir que ses propres rapports
-  if (user && user.role === 'CANDIDAT') {
-    const ownerId = rapport.stage?.candidats_idcandidats;
-    if (ownerId !== user.candidatId) {
-      throw new Error('Rapport non trouvé');
-    }
-  }
+  await assertLectureStage(access, rapport.stage, 'Rapport non trouvé');
 
   return rapport;
 };
@@ -1993,20 +1978,17 @@ const evaluateRapport = async (id, data, evaluePar, agentContext = null) => {
 /**
  * Télécharger le PDF d'un rapport
  */
-const downloadRapport = async (id, user = null) => {
+const downloadRapport = async (id, access) => {
   const rapport = await RapportStage.findOne({
     where: { idrapport: id, del: 0 },
-    include: [{ model: Stage, as: 'stage', attributes: ['candidats_idcandidats'] }],
+    include: [{ model: Stage, as: 'stage', attributes: ['candidats_idcandidats', 'direction_iddirection'] }],
   });
 
   if (!rapport) {
     throw new Error('Rapport non trouvé');
   }
 
-  // IDOR : un candidat ne peut télécharger que son propre rapport
-  if (user && user.role === 'CANDIDAT' && rapport.stage?.candidats_idcandidats !== user.candidatId) {
-    throw new Error('Rapport non trouvé');
-  }
+  await assertLectureStage(access, rapport.stage, 'Rapport non trouvé');
   
   return {
     buffer: fileStorage.readFile(rapport.rapportPdf_path, rapport.rapportPdf),
@@ -2143,6 +2125,19 @@ const createDocumentStage = async (agentId, data, file, agentContext = null) => 
  * @param {{ candidatId?: number|null, agentContext?: { agentId?: number, isSystemRole?: boolean } }} access
  * @param {{ candidats_idcandidats: number, direction_iddirection: number }|null} stage
  */
+/**
+ * Lecture d'un stage et de ses pièces : même règle que les documents (assertCanReadDocumentStage), avec le message
+ * propre à chaque route. Avant le 2026-11-05, seul le candidat était contrôlé : tout agent, de toute direction et
+ * même sans permission STAGE, ouvrait les dossiers (CNIB, casier judiciaire…) en changeant le numéro.
+ */
+const assertLectureStage = async (access, stage, message) => {
+  try {
+    await assertCanReadDocumentStage(access, stage);
+  } catch (_) {
+    throw new Error(message);
+  }
+};
+
 const assertCanReadDocumentStage = async (access, stage) => {
   if (!access || !stage) throw new Error('Document non trouvé');
 

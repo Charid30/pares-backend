@@ -211,7 +211,7 @@ const getMesStages = async (req, res) => {
  */
 const getStageById = async (req, res) => {
   try {
-    const stage = await stageService.getStageById(req.params.id, req.user);
+    const stage = await stageService.getStageById(req.params.id, await buildDocumentStageAccess(req.user));
     return success(res, stage, 'Stage récupéré avec succès');
   } catch (err) {
     return error(res, err.message, 404);
@@ -296,7 +296,7 @@ const downloadStageDocument = async (req, res) => {
     const document = await stageService.downloadStageDocument(
       req.params.id,
       req.params.type,
-      req.user
+      await buildDocumentStageAccess(req.user)
     );
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -313,7 +313,7 @@ const downloadStageDocument = async (req, res) => {
  */
 const downloadConventionStage = async (req, res) => {
   try {
-    const document = await stageService.downloadConventionStage(req.params.id, req.user);
+    const document = await stageService.downloadConventionStage(req.params.id, await buildDocumentStageAccess(req.user));
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${sanitizeFilename(document.filename)}"`);
@@ -549,7 +549,7 @@ const getAllRapports = async (req, res) => {
  */
 const getRapportById = async (req, res) => {
   try {
-    const rapport = await stageService.getRapportById(req.params.id, req.user);
+    const rapport = await stageService.getRapportById(req.params.id, await buildDocumentStageAccess(req.user));
     return success(res, rapport, 'Rapport récupéré avec succès');
   } catch (err) {
     return error(res, err.message, 404);
@@ -603,7 +603,7 @@ const evaluateRapport = async (req, res) => {
  */
 const downloadRapport = async (req, res) => {
   try {
-    const document = await stageService.downloadRapport(req.params.id, req.user);
+    const document = await stageService.downloadRapport(req.params.id, await buildDocumentStageAccess(req.user));
     
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${sanitizeFilename(document.filename)}"`);
@@ -677,13 +677,15 @@ const buildDocumentStageAccess = async (user) => {
     ? user.roleIds
     : (user.roleId ? [user.roleId] : []);
   if (!roleIds.length) return null;
+  // STAGE ou RENOUVELLEMENT : un stage de renouvellement se consulte avec l'un ou l'autre module
   const hasModule = await Permission.count({
-    where: { role_idrole: { [Op.in]: roleIds }, module: 'STAGE', del: 0 },
+    where: { role_idrole: { [Op.in]: roleIds }, module: { [Op.in]: ['STAGE', 'RENOUVELLEMENT'] }, del: 0 },
   });
   if (!hasModule) return null;
 
   const agentContext = getAgentContext(user);
-  if (!agentContext.isSystemRole && await hasGlobalReadAccess(user, 'STAGE')) {
+  if (!agentContext.isSystemRole
+    && (await hasGlobalReadAccess(user, 'STAGE') || await hasGlobalReadAccess(user, 'RENOUVELLEMENT'))) {
     agentContext.isSystemRole = true;
   }
   return { agentContext };

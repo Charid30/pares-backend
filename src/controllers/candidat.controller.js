@@ -8,6 +8,18 @@ const { success, error } = require('../utils/response.util');
 // =====================================================
 
 /**
+ * Chiffres du profil (demandes de stage : total, validées, en attente)
+ * GET /api/candidat/stats
+ */
+const getStats = async (req, res) => {
+  try {
+    return success(res, await candidatService.getStatsCandidat(req.user.candidatId), 'Statistiques récupérées');
+  } catch (err) {
+    return error(res, err.message, 500);
+  }
+};
+
+/**
  * Récupérer le profil du candidat
  * GET /api/candidat/profil
  */
@@ -370,6 +382,7 @@ const getMesRenouvellements = async (req, res) => {
 };
 
 module.exports = {
+  getStats,
   // Profil
   getProfil,
   updateProfil,

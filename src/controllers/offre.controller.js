@@ -114,6 +114,8 @@ const getMesOffres = async (req, res) => {
 const getOffreById = async (req, res) => {
   try {
     const offre = await offreService.getOffreById(req.params.id);
+    // Un candidat ne lit que ses propres offres (authorizeCandidatOuModule)
+    if (req.candidatSeul && offre.candidats_idcandidats !== req.user.candidatId) return error(res, 'Offre non trouvée', 404);
     return success(res, offre, 'Offre récupérée avec succès');
   } catch (err) {
     return error(res, err.message, 404);
@@ -247,6 +249,7 @@ const getMesCandidatures = async (req, res) => {
 const getCandidatureById = async (req, res) => {
   try {
     const candidature = await offreService.getCandidatureById(req.params.id);
+    if (req.candidatSeul && candidature.candidats_idcandidats !== req.user.candidatId) return error(res, 'Candidature non trouvée', 404);
     return success(res, candidature, 'Candidature récupérée avec succès');
   } catch (err) {
     return error(res, err.message, 404);
