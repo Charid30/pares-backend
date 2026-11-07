@@ -53,6 +53,8 @@ const AgentNotificationPref = require('./AgentNotificationPref')(sequelize);
 
 // Notifications in-app
 const Notification = require('./Notification')(sequelize);
+// Table créée par migrations/migration_prod_notification_diffusion.sql
+const NotificationDiffusion = require('./NotificationDiffusion')(sequelize);
 
 // Auth
 const PasswordResetToken = require('./PasswordResetToken')(sequelize);
@@ -557,6 +559,7 @@ module.exports = {
 
   // Notifications in-app
   Notification,
+  NotificationDiffusion,
   PushSubscription,
 
   // Auth

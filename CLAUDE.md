@@ -59,6 +59,11 @@ de l'application en place, `npm install`, redémarrage des services. En cas de d
   admin → tout ; dossier d'une direction → agents **de cette direction** ayant un droit sur le module (consulter suffit), un rôle
   à lecture globale ne reçoit que ses propres directions ; dossier sans direction → rôles à lecture globale avec un droit d'action.
   Vaut pour les nouvelles demandes (stage, offre, aide, audience), le transfert d'un stage (nouvelle direction) et le rappel des aides.
+- **Notifications diffusées par l'admin** (2026-11-07) : écran admin « Notifications push » (`/admin/notifications-push`),
+  route `/api/admin/notifications-diffusion` (**ADMIN seul**). Cibles : candidats (comptes non supprimés), agents actifs
+  (tous ou ceux de directions choisies), tout le monde. Cloche (type `ANNONCE`, `bulkCreate`) **et** push en arrière-plan
+  (`pushService.envoyerPushEnMasse`) ; historique `notification_diffusion` (`migration_prod_notification_diffusion.sql`)
+  avec le bilan des push ; journal d'audit `NOTIFICATION_DIFFUSEE`. `diffusion.service.js`.
 - **Jobs** : `setInterval` dans `src/jobs/` (ex. `stageStatusJob.js`, toutes les heures).
 
 ```

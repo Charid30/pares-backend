@@ -93,4 +93,52 @@ const sendPushToUser = async ({ recipientType, recipientId, titre, message, link
   }
 };
 
-module.exports = { isConfigured, VAPID_PUBLIC_KEY, saveSubscription, removeSubscription, sendPushToUser };
+/**
+ * Appareils abonnés au push pour une liste de destinataires (par lots, pour ne pas dépasser la taille d'un IN).
+ * @param {{ recipientType: string, recipientId: number }[]} destinataires
+ */
+const abonnementsDe = async (destinataires) => {
+  const { Op } = require('sequelize');
+  const resultat = [];
+  for (const type of ['CANDIDAT', 'AGENT']) {
+    const ids = destinataires.filter(d => d.recipientType === type).map(d => d.recipientId);
+    for (let i = 0; i < ids.length; i += 500) {
+      resultat.push(...await PushSubscription.findAll({
+        where: { recipient_type: type, recipient_id: { [Op.in]: ids.slice(i, i + 500) } },
+      }));
+    }
+  }
+  return resultat;
+};
+
+/**
+ * Envoi d'un même push à de nombreux appareils (notification diffusée par l'admin).
+ * Quelques envois à la fois ; abonnements expirés (404/410) supprimés. Jamais d'exception.
+ * @param {Array} abonnements - lignes PushSubscription (abonnementsDe)
+ * @param {(sub) => object} payloadDe - contenu du push pour un abonnement ({ title, body, link })
+ * @returns {{ reussis: number, echecs: number }}
+ */
+const envoyerPushEnMasse = async (abonnements, payloadDe, parallele = 10) => {
+  const bilan = { reussis: 0, echecs: 0 };
+  if (!isConfigured) return bilan;
+  for (let i = 0; i < abonnements.length; i += parallele) {
+    await Promise.all(abonnements.slice(i, i + parallele).map(async (sub) => {
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          JSON.stringify(payloadDe(sub)),
+        );
+        bilan.reussis += 1;
+      } catch (err) {
+        bilan.echecs += 1;
+        if (err.statusCode === 404 || err.statusCode === 410) await sub.destroy().catch(() => {});
+        else console.error('[Push] Erreur envoi groupé:', err.message);
+      }
+    }));
+  }
+  return bilan;
+};
+
+module.exports = {
+  isConfigured, VAPID_PUBLIC_KEY, saveSubscription, removeSubscription, sendPushToUser, abonnementsDe, envoyerPushEnMasse,
+};
