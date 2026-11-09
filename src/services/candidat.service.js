@@ -489,6 +489,11 @@ const getMesDemandesStage = async (candidatId) => {
     };
   });
 
+  // Stage déjà renouvelé (un renouvellement le prolonge, quel que soit son statut) : la suite de la
+  // chaîne se demande depuis ce renouvellement. Les renouvellements font partie de la même liste.
+  const parentsRenouveles = new Set(items.map(i => i.stage_parent_idstage).filter(Boolean));
+  for (const item of items) item.dejaRenouvele = parentsRenouveles.has(item.idstage);
+
   // Le renouvellement prolonge le stage initial : statut « PROLONGE » et durée totale (comme côté admin)
   await enrichirAvecChaine(items);
 

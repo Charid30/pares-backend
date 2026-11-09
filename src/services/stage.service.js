@@ -435,7 +435,7 @@ const getInfosChaines = async (racines) => {
   const infos = new Map();
   const racineDe = new Map();
   for (const r of racines) {
-    infos.set(r.idstage, { dureeTotaleMois: r.dureeStage || 0, nbRenouvellements: 0, finProlongation: null, prolonge: false });
+    infos.set(r.idstage, { dureeTotaleMois: r.dureeStage || 0, nbRenouvellements: 0, finProlongation: null, prolonge: false, dejaRenouvele: false });
     racineDe.set(r.idstage, r.idstage);
   }
   let niveau = racines.map(r => r.idstage);
@@ -450,6 +450,8 @@ const getInfosChaines = async (racines) => {
       racineDe.set(e.idstage, racineId);
       niveau.push(e.idstage);
       const info = infos.get(racineId);
+      // Le stage racine a déjà un renouvellement (quel que soit son statut) : plus d'autorisation sur lui
+      if (e.stage_parent_idstage === racineId) info.dejaRenouvele = true;
       if (STATUTS_PROLONGATION.includes(e.statusStage)) info.prolonge = true;
       if (STATUTS_RENOUVELLEMENT_EFFECTUE.includes(e.statusStage)) {
         info.dureeTotaleMois += e.dureeStage || 0;
@@ -1365,12 +1367,35 @@ const getAllRenouvellements = async (filters = {}, agentContext = null) => {
     compter('REJETE'),
   ]);
 
+  // Renouvellement suivant de la chaîne : le nouveau stage a-t-il déjà été renouvelé, et une
+  // autorisation de renouvellement (stage fini, 7 jours) est-elle active dessus ?
+  const idsNouveaux = rows.map(r => r.stageNouveau?.idstage).filter(Boolean);
+  const [enfants, autorisations] = idsNouveaux.length ? await Promise.all([
+    Stage.findAll({
+      where: { stage_parent_idstage: { [Op.in]: idsNouveaux }, del: 0 },
+      attributes: ['stage_parent_idstage'],
+      raw: true,
+    }),
+    AutorisationRenouvellementStage.findAll({
+      where: { stage_idstage: { [Op.in]: idsNouveaux }, del: 0, usedAt: null, expiresAt: { [Op.gt]: new Date() } },
+      attributes: ['id', 'stage_idstage', 'expiresAt'],
+      raw: true,
+    }),
+  ]) : [[], []];
+  const dejaRenouveles = new Set(enfants.map(e => e.stage_parent_idstage));
+  const autorisationPar = new Map(autorisations.map(a => [a.stage_idstage, { id: a.id, expiresAt: a.expiresAt }]));
+
   // peutAgir : l'agent peut-il agir sur ce renouvellement (même règle que getAllStages)
   const items = rows.map((r) => {
     const json = r.toJSON();
     json.peutAgir = calculerPeutAgir(json.stageNouveau?.direction_iddirection, { agentContext, agentDirectionIds });
+    if (json.stageNouveau) {
+      json.stageNouveau.dejaRenouvele = dejaRenouveles.has(json.stageNouveau.idstage);
+      json.stageNouveau.autorisationRenouvellement = autorisationPar.get(json.stageNouveau.idstage) || null;
+    }
     return json;
   });
+
 
   return {
     rows: items,
@@ -2955,6 +2980,12 @@ const autoriserRenouvellementStage = async (stageId, agentId) => {
 
   if (!['TERMINE', 'EXPIRE'].includes(stage.statusStage)) {
     throw new Error('L\'autorisation de renouvellement n\'est possible que pour un stage terminé ou expiré');
+  }
+
+  // Un stage ne se renouvelle qu'une fois : la suite de la chaîne part du dernier renouvellement
+  const dejaRenouvele = await Stage.findOne({ where: { stage_parent_idstage: stageId, del: 0 }, attributes: ['idstage'] });
+  if (dejaRenouvele) {
+    throw new Error('Ce stage a déjà un renouvellement : accordez l\'autorisation sur le dernier renouvellement (écran Renouvellements).');
   }
 
   // Marquer toute autorisation précédente comme supprimée (del=1) avant d'en créer une nouvelle

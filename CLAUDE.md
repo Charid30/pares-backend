@@ -232,6 +232,14 @@ pares-frontend/src/features/dashboard/
   `stage_parent_idstage`) qui commence le lendemain de la fin du stage actuel.
 - Ouvert au candidat **une semaine** avant la fin (`DELAI_RENOUVELLEMENT_JOURS = 7`, candidat.service.js
   + `peutRenouveler` dans candidat/stages/stages.ts). Stage déjà fini : autorisation admin de 7 jours.
+- **Un stage ne se renouvelle qu'une fois ; la suite de la chaîne part du dernier renouvellement** (2026-11-09),
+  dans la limite de 6 mois continus. Candidat : `dejaRenouvele` (un enfant existe) masque le bouton — `renouvellement`
+  décrit la demande **dont** le stage est issu (avant : il masquait le bouton sur la carte du renouvellement, donc
+  aucun 2ᵉ renouvellement possible). Admin : « Autoriser 7j » dans le détail d'un renouvellement terminé / expiré
+  (`stageNouveau.dejaRenouvele`, `stageNouveau.autorisationRenouvellement`) ; masqué sur un stage déjà renouvelé
+  (`chaine.dejaRenouvele`) et refusé par `autoriserRenouvellementStage`. Comme le 1er : bouton une semaine avant la
+  fin du renouvellement, lettre seule, convention reprise du stage actuel (= celle du renouvellement précédent).
+  Test : `stage.renouvellementSuivant.test.js`.
 - **Direction** : reprise de la demande de stage d'origine (remonte la chaîne si besoin).
 - **Documents** : le candidat ne fournit que sa **lettre**. L'admin et l'agent voient la lettre + la
   **convention de la demande de stage** (`GET /stages/renouvellements/:id/convention-demande`).
