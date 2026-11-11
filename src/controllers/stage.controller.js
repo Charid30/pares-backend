@@ -1014,7 +1014,16 @@ const resoumettreStage = async (req, res) => {
  */
 const deleteStage = async (req, res) => {
   try {
-    const result = await stageService.deleteStage(req.params.id);
+    const result = await stageService.deleteStage(req.params.id, req.user.username || 'Admin');
+    await auditService.log({
+      agentId:  req.user.agentId,
+      agentNom: req.user.username,
+      action:   'STAGE_SUPPRIME',
+      module:   'STAGE',
+      entityId: parseInt(req.params.id),
+      details:  { objet: 'Suppression d\'une demande de stage', stagesSupprimes: result.stagesSupprimes },
+      ip: req.ip,
+    });
     return success(res, result, 'Stage supprimé avec succès');
   } catch (err) {
     return error(res, err.message, 400);

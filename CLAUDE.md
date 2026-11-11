@@ -194,6 +194,9 @@ pares-frontend/src/features/dashboard/
   5. EXPIRE → rapport → TERMINE.
   - **Refus** (motif + pièces non conformes) possible **tant que la convention n'est pas jointe** (bloqué ensuite côté serveur).
   - L'admin garde le raccourci : accepter directement avec la convention.
+  - **Suppression** (2026-11-11) : l'admin supprime une demande de stage **à tout statut** (bouton « Supprimer » du détail,
+    `DELETE /stages/:id`, suppression logique `del = 1`) ; la suite de sa chaîne (renouvellements issus de ce stage et leurs
+    lignes `renouvellement_stage`) est supprimée avec elle. Journal d'audit `STAGE_SUPPRIME`. Test : `stage.suppression.test.js`.
   - Notifications au candidat (in-app + push) à chaque étape ; **relance des agents** (`stageRelanceJob`) : demandes
     bloquées depuis 7 jours en traitement (approbateurs) ou en programmation (RH), au plus une fois par semaine,
     e-mail + push.

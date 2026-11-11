@@ -2668,11 +2668,33 @@ const transfererStage = async (stageId, newDirectionId, agentContext) => {
  * Supprimer un stage (soft delete : del = 1)
  * Requiert permission SUPPRIMER sur STAGE
  */
-const deleteStage = async (stageId) => {
+const deleteStage = async (stageId, auteur = 'Admin') => {
   const stage = await Stage.findOne({ where: { idstage: stageId, del: 0 } });
   if (!stage) throw new Error('Stage non trouvé');
-  await stage.update({ del: 1 });
-  return { deleted: true };
+
+  // Possible à tout statut. Les renouvellements issus de ce stage (toute la suite de la chaîne)
+  // sont supprimés avec lui : sans leur stage d'origine, ils seraient orphelins.
+  const ids = [stage.idstage];
+  for (let niveau = [stage.idstage]; niveau.length;) {
+    const enfants = await Stage.findAll({
+      where: { stage_parent_idstage: { [Op.in]: niveau }, del: 0 },
+      attributes: ['idstage'],
+      raw: true,
+    });
+    niveau = enfants.map(e => e.idstage).filter(id => !ids.includes(id));
+    ids.push(...niveau);
+  }
+
+  await sequelize.transaction(async (transaction) => {
+    await Stage.update({ del: 1 }, { where: { idstage: { [Op.in]: ids } }, transaction });
+    // La demande de renouvellement qui a créé ce stage (et celles de la suite) : supprimées aussi,
+    // ce qui rend de nouveau possible le renouvellement du stage précédent.
+    await RenouvellementStage.update(
+      { del: 1, deletedBy: auteur, deletedDate: new Date() },
+      { where: { stage_nouveau_idstage: { [Op.in]: ids }, del: 0 }, transaction },
+    );
+  });
+  return { deleted: true, stagesSupprimes: ids.length };
 };
 
 /**
