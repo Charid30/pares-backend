@@ -248,3 +248,28 @@ describe('securityMiddleware — explorateur de base de l\'admin', () => {
     await attendreBannedIp(ip, (r) => r.attempts >= 1);
   });
 });
+
+describe('securityMiddleware — champs de mot de passe', () => {
+  test.each([
+    ['password', 'Kevin#{2026}'],
+    ['password', 'Sonabhy${25}'],
+    ['newPassword', 'Pass{{2026}}'],
+    ['confirmPassword', 'Abc;sh2026'],
+    ['motDePasse', "Test'or'1"],
+  ])('laisse passer un mot de passe à symboles (%s = %s)', async (champ, valeur) => {
+    const res = mockRes();
+    const next = jest.fn();
+    await securityMiddleware(requete({ body: { username: 'agent', [champ]: valeur } }), res, next);
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  test('les autres champs du formulaire de connexion restent analysés', async () => {
+    const ip = '203.0.113.70';
+    const res = mockRes();
+    const next = jest.fn();
+    await securityMiddleware(requete({ ip, body: { username: "admin' OR '1'='1", password: 'x' } }), res, next);
+    expect(next).not.toHaveBeenCalled();
+    await attendreBannedIp(ip, (r) => r.attempts >= 1);
+  });
+});

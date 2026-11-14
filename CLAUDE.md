@@ -128,6 +128,8 @@ pares-frontend/src/features/dashboard/
   `PUT /candidat/profil` applique les mêmes règles aux champs **modifiés** (anciens profils non conformes enregistrables).
   `security.middleware.js` bloque aussi les sondes d'injection de gabarit (`${…}`, `#{…}`, `{{…}}`, `<%=`) — compte
   `xalgotest77` (mailinator) d'août 2026. Les champs texte des routes multipart ne passent pas par ce middleware.
+  Les **champs de mot de passe** (`password`, `newPassword`, `confirmPassword`, `motDePasse`…) ne sont **pas analysés**
+  (2026-11-14) : un mot de passe fort comme `Kevin#{2026}` était pris pour une injection → IP bannie au 2e essai.
   `registerSchema` supprime tout champ non déclaré (`stripUnknown`) : un nouveau champ d'inscription doit y être ajouté
   (le genre et le récépissé étaient perdus ainsi jusqu'au 2026-11-02).
   **Captcha Cloudflare Turnstile** (2026-11-02) : lancé à l'envoi du formulaire, invisible sauf si Cloudflare demande une

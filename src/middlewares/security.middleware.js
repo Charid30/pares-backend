@@ -74,7 +74,14 @@ function getIp(req) {
 // Analyser récursivement un objet/chaîne pour détecter des patterns.
 // Retourne aussi la clé et la valeur (tronquée) ayant déclenché la détection,
 // pour permettre à l'administrateur d'inspecter la requête suspecte a posteriori.
+// Champs de mot de passe (password, newPassword, confirmPassword, motDePasse…) : jamais analysés.
+// Un mot de passe n'est ni affiché ni placé dans une requête SQL (il est seulement haché), et un mot de
+// passe fort comme « Kevin#{2026} » ressemblait à une injection : refus puis bannissement de l'IP
+// (souvent partagée par tout un bureau) au 2e essai de connexion.
+const CHAMP_MOT_DE_PASSE = /password|mot_?de_?passe|^mdp/i;
+
 function detectInValue(value, key = null) {
+  if (key && CHAMP_MOT_DE_PASSE.test(key)) return null;
   if (typeof value === 'string') {
     for (const { regex, label } of INJECTION_PATTERNS) {
       if (regex.test(value)) {
