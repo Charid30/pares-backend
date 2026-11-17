@@ -224,6 +224,9 @@ pares-frontend/src/features/dashboard/
   La permission VALIDER suffit pour cette redirection (sinon TRANSFERER ; MODIFIER garde aussi la redirection des aides).
 - **Redirection seulement avant la décision** : offres et aides En attente / En traitement (En traitement repart
   **En attente** pour la direction cible), audiences En attente. Validée, rejetée, acceptée, annulée : plus de redirection.
+  **Aide : retour au statut précédent** (2026-11-17, **ADMIN seul**, `PUT /aides/:id/statut-precedent`) : Validée / Rejetée →
+  En traitement → En attente, décision effacée (motif, rendez-vous), journal `AIDE_STATUT_PRECEDENT` ; sert à rouvrir la
+  redirection (bouton dans le détail admin, au-dessus de l'affectation). Test : `aide.statutPrecedent.test.js`.
 - Un agent ne valide, rejette ou redirige que les demandes de **ses directions** (`assertAgitSurDirection` ; admin et
   lecture globale partout ; agent sans direction : aucune restriction, comme la liste).
 - Redirection tracée (`transferePar`, `transfereDate`, aussi sur `offres` depuis `migration_prod_demandes_sans_direction.sql`)

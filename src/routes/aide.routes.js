@@ -182,6 +182,18 @@ router.put(
 );
 
 /**
+ * @route   PUT /api/aides/:id/statut-precedent
+ * @desc    Revenir au statut précédent (Validée / Rejetée → En traitement → En attente), pour pouvoir la rediriger
+ * @access  Private — ADMIN uniquement
+ */
+router.put(
+  '/:id/statut-precedent',
+  authenticate,
+  authorize(['ADMIN']),
+  aideController.revenirStatutPrecedentAide
+);
+
+/**
  * @route   DELETE /api/aides/:id
  * @desc    Supprimer une aide
  * @access  Private (ADMIN)

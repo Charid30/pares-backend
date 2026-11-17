@@ -127,6 +127,29 @@ const transfererAide = async (req, res) => {
 };
 
 /**
+ * Revenir au statut précédent (ADMIN) : Validée / Rejetée → En traitement → En attente
+ * PUT /api/aides/:id/statut-precedent
+ */
+const revenirStatutPrecedentAide = async (req, res) => {
+  try {
+    const aideId = parseInt(req.params.id);
+    const { aide, ancien, nouveau } = await aideService.revenirStatutPrecedentAide(aideId);
+    await auditService.log({
+      agentId:  req.user?.agentId,
+      agentNom: req.user?.username,
+      action:   'AIDE_STATUT_PRECEDENT',
+      module:   'AIDE',
+      entityId: aideId,
+      details:  { objet: `Aide — ${aide.titre || aide.typeAide || ''}`, ancienStatut: ancien, nouveauStatut: nouveau },
+      ip: req.ip,
+    });
+    return success(res, aide, 'La demande est revenue au statut précédent');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
+/**
  * Obtenir les aides actives créées par admin (pour candidatures)
  * GET /api/aides/actives
  */
@@ -455,6 +478,7 @@ module.exports = {
   deleteAide,
   getFichierAide,
   transfererAide,
+  revenirStatutPrecedentAide,
 
   // Candidatures
   createCandidatureAide,

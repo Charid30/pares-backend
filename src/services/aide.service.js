@@ -195,6 +195,29 @@ const transfererAide = async (aideId, newDirectionId, agentId = null, agentNom =
   });
 };
 
+// Retour au statut précédent (ADMIN seul, 2026-11-17) : Validée / Rejetée → En traitement → En attente.
+// Sert surtout à rouvrir la redirection vers une autre direction, possible seulement avant la décision.
+const STATUT_PRECEDENT_AIDE = { VALIDEE: 'EN_TRAITEMENT', REJETEE: 'EN_TRAITEMENT', EN_TRAITEMENT: 'EN_ATTENTE' };
+
+const revenirStatutPrecedentAide = async (aideId) => {
+  const aide = await Aide.findOne({ where: { idaide: aideId, creePar: 'CANDIDAT', del: 0 } });
+  if (!aide) throw new Error('Aide introuvable');
+
+  const precedent = STATUT_PRECEDENT_AIDE[aide.statusAide];
+  if (!precedent) throw new Error('Cette demande d\'aide n\'a pas de statut précédent');
+
+  const ancien = aide.statusAide;
+  // La décision est annulée : motif de refus et rendez-vous ne valent plus.
+  await aide.update({
+    statusAide: precedent,
+    motifRefus: null,
+    dateTraitement: null,
+    heureTraitement: null,
+    lastModifiedDate: new Date(),
+  });
+  return { aide, ancien, nouveau: precedent };
+};
+
 /**
  * Obtenir les aides actives créées par admin (pour candidatures)
  */
@@ -530,7 +553,8 @@ module.exports = {
   evaluateAide,
   deleteAide,
   transfererAide,
-  
+  revenirStatutPrecedentAide,
+
   // Candidatures
   createCandidatureAide,
   getCandidaturesByCandidat,
