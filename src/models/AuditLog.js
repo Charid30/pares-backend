@@ -37,6 +37,13 @@ const AuditLog = sequelize.define('audit_log', {
   details: {
     type: DataTypes.JSON,
     allowNull: true,
+    // MariaDB stocke le JSON en LONGTEXT : le pilote mysql le renvoie sous forme de texte. Sans cette lecture,
+    // l'écran Sécurité recevait une chaîne et n'affichait ni motif, ni chemin, ni valeur (lignes vides).
+    get() {
+      const valeur = this.getDataValue('details');
+      if (typeof valeur !== 'string') return valeur;
+      try { return JSON.parse(valeur); } catch { return valeur; }
+    },
   },
   // Adresse IP de l'appelant
   ip_address: {

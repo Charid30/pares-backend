@@ -273,3 +273,30 @@ describe('securityMiddleware — champs de mot de passe', () => {
     await attendreBannedIp(ip, (r) => r.attempts >= 1);
   });
 });
+
+describe('securityMiddleware — requêtes simultanées (robot, 18/11/2026)', () => {
+  test('4 requêtes au même instant : compteur exact, une seule alerte « IP bannie »', async () => {
+    const notifService = require('../../services/notification.service');
+    const alerte = jest.spyOn(notifService, 'onIpBannie').mockResolvedValue();
+    const ip = '203.0.113.70';
+    const sondes = ['/etc/passwd', '../../../etc/shadow', '../../../../windows/system32', '/proc/self/environ'];
+
+    await Promise.all(sondes.map((s) => securityMiddleware(requete({ ip, query: { file: s } }), mockRes(), jest.fn())));
+    const record = await attendreBannedIp(ip, (r) => r.attempts >= 4 && r.banned_until, 3000);
+    // laisser se terminer les écritures du journal
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(record.attempts).toBe(4);
+    expect(record.banned_until).not.toBeNull();
+    expect(alerte).toHaveBeenCalledTimes(1);
+    expect(await AuditLog.count({ where: { action: 'IP_BANNIE', ip_address: ip } })).toBe(1);
+    alerte.mockRestore();
+  });
+
+  test('les détails du journal se lisent comme un objet, même stockés en texte (MariaDB)', async () => {
+    const log = await AuditLog.create({ action: 'INJECTION_TENTATIVE', module: 'SECURITE', ip_address: '203.0.113.71', details: { pattern: 'PATH_SENSITIVE' } });
+    log.setDataValue('details', '{"pattern":"PATH_SENSITIVE","path":"/api/x"}');
+    expect(log.details).toEqual({ pattern: 'PATH_SENSITIVE', path: '/api/x' });
+    expect(log.toJSON().details.path).toBe('/api/x');
+  });
+});

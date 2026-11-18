@@ -2,6 +2,7 @@
 // Détecte les tentatives d'injection (SQL, XSS, path traversal, commandes)
 // et bannit l'IP pour 72h après 5 tentatives.
 
+const { Op } = require('sequelize');
 const BannedIp = require('../models/BannedIp');
 const AuditLog = require('../models/AuditLog');
 const notifService = require('../services/notification.service');
@@ -97,30 +98,50 @@ function detectInValue(value, key = null) {
   return null;
 }
 
-// Enregistrer la tentative en base (async, non bloquant)
+// Enregistrer la tentative en base (async, non bloquant).
+// Les robots envoient souvent plusieurs requêtes au même instant : le compteur est donc incrémenté
+// par la base (UPDATE attempts = attempts + 1) et le bannissement posé par une mise à jour conditionnelle.
+// Avant (18/11/2026, 34.118.70.1) : 4 requêtes simultanées lisaient toutes « 1 tentative », écrivaient
+// toutes « 2 » et chacune envoyait l'alerte « IP bannie » (3 alertes, compteur faux).
 async function recordAttempt(ip, match, req) {
   const { label: pattern, field: matchedField, value: matchedValue } = match;
   try {
-    const [record, created] = await BannedIp.findOrCreate({
-      where: { ip_address: ip },
-      defaults: { attempts: 1, last_pattern: pattern, banned_until: null },
-    });
-
-    if (!created) {
-      record.attempts += 1;
-      record.last_pattern = pattern;
-
-      if (record.attempts >= BAN_THRESHOLD) {
-        record.banned_until = new Date(Date.now() + BAN_DURATION_MS);
+    // Pas de findOrCreate : sa transaction interne échoue quand plusieurs requêtes arrivent ensemble.
+    let record = await BannedIp.findOne({ where: { ip_address: ip } });
+    let created = false;
+    if (!record) {
+      try {
+        record = await BannedIp.create({ ip_address: ip, attempts: 1, last_pattern: pattern, banned_until: null });
+        created = true;
+      } catch (err) {
+        // Deux créations simultanées : l'une échoue sur l'unicité de l'IP, la ligne existe désormais.
+        if (err.name !== 'SequelizeUniqueConstraintError') throw err;
+        record = await BannedIp.findOne({ where: { ip_address: ip } });
       }
+    }
 
-      await record.save();
+    let vientDEtreBannie = false;
+    if (!created) {
+      await BannedIp.increment('attempts', { by: 1, where: { id: record.id } });
+      await BannedIp.update({ last_pattern: pattern }, { where: { id: record.id } });
+      await record.reload();
+
+      if (record.attempts >= BAN_THRESHOLD && !record.permanent) {
+        const maintenant = new Date();
+        // Une seule requête « gagne » le passage au bannissement : c'est elle qui alerte les administrateurs.
+        const [nb] = await BannedIp.update(
+          { banned_until: new Date(maintenant.getTime() + BAN_DURATION_MS) },
+          { where: { id: record.id, [Op.or]: [{ banned_until: null }, { banned_until: { [Op.lte]: maintenant } }] } },
+        );
+        vientDEtreBannie = nb > 0;
+        await record.reload();
+      }
     }
 
     await AuditLog.create({
       agent_id:   null,
       agent_nom:  null,
-      action:     record.attempts >= BAN_THRESHOLD ? 'IP_BANNIE' : 'INJECTION_TENTATIVE',
+      action:     vientDEtreBannie ? 'IP_BANNIE' : 'INJECTION_TENTATIVE',
       module:     'SECURITE',
       entity_id:  null,
       details: {
@@ -138,7 +159,7 @@ async function recordAttempt(ip, match, req) {
 
     // Alerter les administrateurs uniquement au moment précis où l'IP bascule en banni
     // (pas à chaque tentative suivante, bloquée en amont par le middleware une fois bannie).
-    if (record.attempts === BAN_THRESHOLD) {
+    if (vientDEtreBannie) {
       notifService.onIpBannie({
         ip,
         pattern,
