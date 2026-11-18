@@ -2779,6 +2779,36 @@ const approuverStage = async (stageId, agentUsername, agentContext = null, dateD
   return stage.reload();
 };
 
+/**
+ * Ramener une demande « En cours de programmation » au statut « En traitement » (ADMIN seul, 2026-11-17) :
+ * l'approbation est annulée (date proposée et maître de stage effacés) ; la demande peut être de nouveau
+ * approuvée, rejetée ou transférée. Une demande de renouvellement passe par « Annuler l'approbation » du renouvellement.
+ */
+const annulerApprobationStage = async (stageId) => {
+  const stage = await Stage.findOne({ where: { idstage: stageId, del: 0 } });
+  if (!stage) throw new Error('Stage non trouvé');
+  if (stage.stage_parent_idstage) {
+    throw new Error('Pour un renouvellement, utilisez « Annuler l\'approbation » dans l\'écran Renouvellements');
+  }
+  if (stage.statusStage !== 'PROGRAMMATION_EN_COURS') {
+    throw new Error(`Seule une demande « En cours de programmation » peut revenir « En traitement » (statut actuel : ${stage.statusStage})`);
+  }
+  const convention = await DocumentStage.count({ where: { stage_idstage: stageId, typeDocument: 'CONVENTION', del: 0 } });
+  if (convention) throw new Error('Une convention est déjà jointe à cette demande : elle ne peut plus revenir « En traitement »');
+
+  await stage.update({
+    statusStage: 'EN_COURS_DE_TRAITEMENT',
+    dateDebutProposee: null,
+    nomMaitreStage: null,
+    lastmodifiedDate: new Date(),
+  });
+
+  notifierCandidat(stage.candidats_idcandidats, 'STAGE_EN_TRAITEMENT', 'Demande de stage de nouveau en traitement',
+    `Votre demande de stage (${stage.domaineStage}) est de nouveau en cours de traitement.`);
+
+  return stage.reload();
+};
+
 // =====================================================
 // DEMANDES DE MODIFICATION (SUSPENSION / ANNULATION)
 // =====================================================
@@ -3162,6 +3192,7 @@ module.exports = {
 
   // Approbation de stage
   approuverStage,
+  annulerApprobationStage,
 
   // Demandes de modification
   createDemandeModification,

@@ -550,6 +550,18 @@ router.put(
 );
 
 /**
+ * @route   PUT /api/stages/:id/annuler-approbation
+ * @desc    Ramener une demande « En cours de programmation » au statut « En traitement »
+ * @access  Private — ADMIN uniquement
+ */
+router.put(
+  '/:id/annuler-approbation',
+  authenticate,
+  authorize(['ADMIN']),
+  stageController.annulerApprobationStage
+);
+
+/**
  * @route   PUT /api/stages/:id/autoriser-renouvellement
  * @desc    Accorder une autorisation de 7 jours pour renouveler un stage TERMINE ou EXPIRE
  * @access  Private — ADMIN ou lectureGlobale + permission VALIDER sur STAGE

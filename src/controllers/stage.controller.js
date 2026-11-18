@@ -1146,6 +1146,28 @@ const approuverStage = async (req, res) => {
   }
 };
 
+/**
+ * Ramener une demande « En cours de programmation » au statut « En traitement » (ADMIN)
+ * PUT /api/stages/:id/annuler-approbation
+ */
+const annulerApprobationStage = async (req, res) => {
+  try {
+    const stage = await stageService.annulerApprobationStage(parseInt(req.params.id));
+    await auditService.log({
+      agentId:  req.user.agentId,
+      agentNom: req.user.username,
+      action:   'STAGE_APPROBATION_ANNULEE',
+      module:   'STAGE',
+      entityId: parseInt(req.params.id),
+      details:  { objet: 'Demande de stage', ancienStatut: 'PROGRAMMATION_EN_COURS', nouveauStatut: 'EN_COURS_DE_TRAITEMENT' },
+      ip: req.ip,
+    });
+    return success(res, stage, 'La demande est revenue « En traitement »');
+  } catch (err) {
+    return error(res, err.message, 400);
+  }
+};
+
 // =====================================================
 // AUTORISATION DE RENOUVELLEMENT
 // =====================================================
@@ -1369,6 +1391,7 @@ module.exports = {
 
   // Approbation
   approuverStage,
+  annulerApprobationStage,
 
   // Autorisation de renouvellement
   autoriserRenouvellement,

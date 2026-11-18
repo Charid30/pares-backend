@@ -196,6 +196,9 @@ pares-frontend/src/features/dashboard/
   5. EXPIRE → rapport → TERMINE.
   - **Refus** (motif + pièces non conformes) possible **tant que la convention n'est pas jointe** (bloqué ensuite côté serveur).
   - L'admin garde le raccourci : accepter directement avec la convention.
+  - **Retour « En traitement »** (2026-11-18, **ADMIN seul**, `PUT /stages/:id/annuler-approbation`) : une demande « En cours de
+    programmation » sans convention revient « En traitement » (date proposée et maître de stage effacés, candidat notifié, journal
+    `STAGE_APPROBATION_ANNULEE`) ; renouvellements exclus (ils ont leur « Annuler l'approbation »). Test : `stage.annulerApprobation.test.js`.
   - **Suppression** (2026-11-11) : l'admin supprime une demande de stage **à tout statut** (bouton « Supprimer » du détail,
     `DELETE /stages/:id`, suppression logique `del = 1`) ; la suite de sa chaîne (renouvellements issus de ce stage et leurs
     lignes `renouvellement_stage`) est supprimée avec elle. Journal d'audit `STAGE_SUPPRIME`. Test : `stage.suppression.test.js`.
