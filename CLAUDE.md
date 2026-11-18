@@ -130,6 +130,9 @@ pares-frontend/src/features/dashboard/
   `xalgotest77` (mailinator) d'août 2026. Les champs texte des routes multipart ne passent pas par ce middleware.
   Les **champs de mot de passe** (`password`, `newPassword`, `confirmPassword`, `motDePasse`…) ne sont **pas analysés**
   (2026-11-14) : un mot de passe fort comme `Kevin#{2026}` était pris pour une injection → IP bannie au 2e essai.
+  **Deux tentatives au plus, même en rafale** (2026-11-18) : compteur en mémoire (60 s, PARES = un seul processus PM2)
+  → la 3e requête simultanée reçoit 403 ; en base, compteur atomique et une seule alerte « IP bannie » par bannissement.
+  `audit_log.details` (LONGTEXT sous MariaDB) est relu comme objet par un getter du modèle `AuditLog`.
   `registerSchema` supprime tout champ non déclaré (`stripUnknown`) : un nouveau champ d'inscription doit y être ajouté
   (le genre et le récépissé étaient perdus ainsi jusqu'au 2026-11-02).
   **Captcha Cloudflare Turnstile** (2026-11-02) : lancé à l'envoi du formulaire, invisible sauf si Cloudflare demande une

@@ -25,6 +25,7 @@ const requete = (overrides = {}) => ({
 
 beforeEach(async () => {
   await resetDb();
+  securityMiddleware._viderMemoire();
 });
 
 // recordAttempt() n'est jamais "await" par securityMiddleware (fire-and-forget
@@ -275,18 +276,22 @@ describe('securityMiddleware — champs de mot de passe', () => {
 });
 
 describe('securityMiddleware — requêtes simultanées (robot, 18/11/2026)', () => {
-  test('4 requêtes au même instant : compteur exact, une seule alerte « IP bannie »', async () => {
+  test('4 requêtes au même instant : 2 tentatives au plus, les suivantes reçoivent 403, une seule alerte', async () => {
     const notifService = require('../../services/notification.service');
     const alerte = jest.spyOn(notifService, 'onIpBannie').mockResolvedValue();
     const ip = '203.0.113.70';
     const sondes = ['/etc/passwd', '../../../etc/shadow', '../../../../windows/system32', '/proc/self/environ'];
+    const reponses = sondes.map(() => mockRes());
 
-    await Promise.all(sondes.map((s) => securityMiddleware(requete({ ip, query: { file: s } }), mockRes(), jest.fn())));
-    const record = await attendreBannedIp(ip, (r) => r.attempts >= 4 && r.banned_until, 3000);
+    await Promise.all(sondes.map((s, i) => securityMiddleware(requete({ ip, query: { file: s } }), reponses[i], jest.fn())));
+    const codes = reponses.map((r) => r.status.mock.calls[0][0]).sort();
+    expect(codes).toEqual([400, 400, 403, 403]);
+
+    const record = await attendreBannedIp(ip, (r) => r.attempts >= 2 && r.banned_until, 3000);
     // laisser se terminer les écritures du journal
     await new Promise((r) => setTimeout(r, 100));
 
-    expect(record.attempts).toBe(4);
+    expect(record.attempts).toBe(2);
     expect(record.banned_until).not.toBeNull();
     expect(alerte).toHaveBeenCalledTimes(1);
     expect(await AuditLog.count({ where: { action: 'IP_BANNIE', ip_address: ip } })).toBe(1);
@@ -298,5 +303,23 @@ describe('securityMiddleware — requêtes simultanées (robot, 18/11/2026)', ()
     log.setDataValue('details', '{"pattern":"PATH_SENSITIVE","path":"/api/x"}');
     expect(log.details).toEqual({ pattern: 'PATH_SENSITIVE', path: '/api/x' });
     expect(log.toJSON().details.path).toBe('/api/x');
+  });
+
+  test('une tentative déjà en base compte : la 1re requête de la rafale bannit', async () => {
+    const ip = '203.0.113.72';
+    await BannedIp.create({ ip_address: ip, attempts: 1, banned_until: null });
+    const reponses = [mockRes(), mockRes(), mockRes()];
+    await Promise.all(reponses.map((res) => securityMiddleware(requete({ ip, query: { f: '/etc/passwd' } }), res, jest.fn())));
+    expect(reponses.map((r) => r.status.mock.calls[0][0]).sort()).toEqual([400, 403, 403]);
+    await attendreBannedIp(ip, (r) => r.attempts >= 2 && r.banned_until, 3000);
+  });
+
+  test('une seule tentative ne bloque pas les requêtes normales suivantes', async () => {
+    const ip = '203.0.113.73';
+    await securityMiddleware(requete({ ip, query: { f: '/etc/passwd' } }), mockRes(), jest.fn());
+    const next = jest.fn();
+    await securityMiddleware(requete({ ip, body: { titre: 'Demande normale' } }), mockRes(), next);
+    expect(next).toHaveBeenCalled();
+    await attendreBannedIp(ip, (r) => r.attempts >= 1);
   });
 });

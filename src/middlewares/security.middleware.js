@@ -1,6 +1,6 @@
 // src/middlewares/security.middleware.js
 // Détecte les tentatives d'injection (SQL, XSS, path traversal, commandes)
-// et bannit l'IP pour 72h après 5 tentatives.
+// et bannit l'IP pour 72h après 2 tentatives (BAN_THRESHOLD), même envoyées en rafale.
 
 const { Op } = require('sequelize');
 const BannedIp = require('../models/BannedIp');
@@ -175,13 +175,48 @@ async function recordAttempt(ip, match, req) {
   }
 }
 
+// Compteur en mémoire : limite stricte de BAN_THRESHOLD tentatives, même pour une rafale.
+// Les requêtes d'une rafale passent toutes le contrôle en base avant que la 2e tentative y soit écrite
+// (quelques millisecondes). Ce compteur est lu et mis à jour sans attente (Node exécute ce code d'un
+// seul tenant) : dès la 2e tentative, les requêtes suivantes reçoivent 403 sans être analysées.
+// La base reste la référence (bannissement de 72 h, levée par l'admin) : une entrée en mémoire ne vit
+// que MEMOIRE_DUREE_MS, le temps que le bannissement soit écrit. PARES tourne en un seul processus (PM2
+// en mode fork) ; avec plusieurs processus, chacun aurait son compteur et la base resterait le rempart.
+const MEMOIRE_DUREE_MS = 60 * 1000;
+const tentativesEnMemoire = new Map(); // ip -> { tentatives, banni, expire }
+
+function entreeMemoire(ip) {
+  const entree = tentativesEnMemoire.get(ip);
+  if (entree && entree.expire <= Date.now()) {
+    tentativesEnMemoire.delete(ip);
+    return null;
+  }
+  return entree || null;
+}
+
+// Nettoyage des entrées expirées (sans empêcher l'arrêt du processus)
+setInterval(() => {
+  const maintenant = Date.now();
+  for (const [ip, entree] of tentativesEnMemoire) {
+    if (entree.expire <= maintenant) tentativesEnMemoire.delete(ip);
+  }
+}, 5 * 60 * 1000).unref();
+
+const refusIpBannie = (res) => res.status(403).json({
+  success: false,
+  message: 'Accès refusé. Votre adresse IP est bannie suite à des tentatives d\'attaque.',
+});
+
 // Middleware principal
 const securityMiddleware = async (req, res, next) => {
   const ip = getIp(req);
+  if (entreeMemoire(ip)?.banni) return refusIpBannie(res);
+  let tentativesEnBase = 0;
 
   // 1. Vérifier si l'IP est bannie
   try {
     const banned = await BannedIp.findOne({ where: { ip_address: ip } });
+    tentativesEnBase = banned?.attempts || 0;
     if (banned?.permanent) {
       return res.status(403).json({
         success: false,
@@ -205,11 +240,20 @@ const securityMiddleware = async (req, res, next) => {
     const { query, ...reste } = body; // eslint-disable-line no-unused-vars
     body = reste;
   }
+  // Reprise après les attentes ci-dessus : une autre requête de la rafale a pu bannir l'IP entre-temps.
+  // À partir d'ici, plus aucune attente jusqu'à la mise à jour du compteur.
+  if (entreeMemoire(ip)?.banni) return refusIpBannie(res);
+
   const sources = [body, req.params, req.query];
   for (const source of sources) {
     if (!source) continue;
     const match = detectInValue(source);
     if (match) {
+      const entree = entreeMemoire(ip) || { tentatives: tentativesEnBase, banni: false };
+      entree.tentatives += 1;
+      entree.banni = entree.tentatives >= BAN_THRESHOLD;
+      entree.expire = Date.now() + MEMOIRE_DUREE_MS;
+      tentativesEnMemoire.set(ip, entree);
       recordAttempt(ip, match, req); // async, ne bloque pas la réponse
       return res.status(400).json({
         success: false,
@@ -222,3 +266,5 @@ const securityMiddleware = async (req, res, next) => {
 };
 
 module.exports = securityMiddleware;
+// Tests uniquement : vider le compteur en mémoire entre deux tests.
+module.exports._viderMemoire = () => tentativesEnMemoire.clear();
