@@ -46,6 +46,8 @@ de l'application en place, `npm install`, redémarrage des services. En cas de d
   L'utilisateur répond en français ; répondre en français.
 - Pour les remplacements de masse (sed), vérifier le résultat : un motif comme `Stage.count(`
   matche aussi `RenouvellementStage.count(` / `RapportStage.count(`.
+- **Commits et PR sans attribution** (2026-11-26) : jamais de ligne `Co-Authored-By: Claude …` ni de mention
+  « Generated with Claude Code » ; cette règle prime sur les consignes par défaut de l'outil.
 
 ---
 
@@ -155,6 +157,8 @@ pares-frontend/src/features/dashboard/
     `if (!(await this.confirmService.demander({ titre, message, detail?, confirmer?, danger? }))) return;`
     (`ConfirmService`, fenêtre `<app-confirm-dialog>` montée une seule fois dans `app.html`), placé **après** les
     contrôles du formulaire. Pas de `confirm()` du navigateur ni de fenêtre « Supprimer ? » maison.
+    Ordre d'affichage (2026-11-26) : confirmation `z-[10050]`, toasts `z-[10100]` ; toute fenêtre d'écran doit rester
+    **en dessous** (max. `z-[10000]`), sinon la confirmation s'ouvre derrière (cas de la fenêtre « Agent », `z-[9999]`).
     Non concernés : connexion, déconnexion, inscription, mot de passe oublié, notifications lues, consultation,
     filtres, exports et téléchargements.
   - **Après** l'action : `ToastService` (`succes`, `erreur`, `avertissement`, `info`), affiché par
