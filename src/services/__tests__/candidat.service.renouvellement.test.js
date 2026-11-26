@@ -1,4 +1,4 @@
-// Test d'intégration : demanderRenouvellement — fenêtre d'une semaine avant
+// Test d'intégration : demanderRenouvellement — fenêtre de deux semaines avant
 // la fin du stage, et la règle des 6 mois appliquée au cumul chaîne + durée
 // demandée (pas seulement à la chaîne déjà terminée comme dans soumettreDemandeStage).
 jest.mock('../../utils/fileStorage.util', () => ({
@@ -71,11 +71,11 @@ describe('demanderRenouvellement', () => {
     ).rejects.toThrow('Aucune autorisation de renouvellement active');
   });
 
-  test('refuse plus d\'une semaine avant la fin du stage', async () => {
+  test('refuse plus de deux semaines avant la fin du stage', async () => {
     const candidat = await creerCandidat();
     const { direction, service } = await creerDirectionEtService();
     const stage = await creerStageEnCours(candidat.idcandidats, direction, service, {
-      dateFinEffective: isoDansNJours(10),
+      dateFinEffective: isoDansNJours(15),
     });
 
     await expect(
@@ -205,7 +205,7 @@ describe('demanderRenouvellement', () => {
     expect(nouveauStage.service_idservice).toBe(service.idservice);
   });
 
-  test('accepte dans la fenêtre d\'une semaine et crée le stage de renouvellement', async () => {
+  test('accepte dans la fenêtre de deux semaines et crée le stage de renouvellement', async () => {
     const candidat = await creerCandidat();
     const { direction, service } = await creerDirectionEtService();
     const stage = await creerStageEnCours(candidat.idcandidats, direction, service, {

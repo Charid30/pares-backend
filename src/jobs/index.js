@@ -5,6 +5,7 @@ const { updateAllStageStatuses } = require('./stageStatusJob');
 const { runEmailQueueJob } = require('./emailQueueJob');
 const { runAideReminderJob } = require('./aideReminderJob');
 const { runStageRelanceJob } = require('./stageRelanceJob');
+const { runRenouvellementRappelJob } = require('./renouvellementRappelJob');
 
 const STATUS_CHECK_INTERVAL  = 60 * 60 * 1000;       // 1 heure
 const EMAIL_QUEUE_INTERVAL   =  5 * 60 * 1000;       // 5 minutes
@@ -19,6 +20,12 @@ let emailQueueInterval   = null;
 let aideReminderInterval = null;
 let stageRelanceInterval = null;
 let stageRelanceDemarrage = null;
+let rappelRenouvellementInterval = null;
+let rappelRenouvellementDemarrage = null;
+// Rappel au candidat de la fin de son stage (renouvellement) : vérification toutes les heures,
+// un rappel tous les deux jours au plus, en journée (voir renouvellementRappelJob)
+const RAPPEL_RENOUVELLEMENT_INTERVAL = 60 * 60 * 1000;   // 1 heure
+const RAPPEL_RENOUVELLEMENT_DEMARRAGE = 10 * 60 * 1000;  // 10 minutes après le démarrage
 
 /**
  * Execute toutes les verifications de statuts
@@ -51,7 +58,11 @@ const startAllJobs = () => {
   stageRelanceDemarrage = setTimeout(runStageRelanceJob, STAGE_RELANCE_DEMARRAGE);
   stageRelanceInterval = setInterval(runStageRelanceJob, STAGE_RELANCE_INTERVAL);
 
-  console.log(`[JOBS] Statuts : ${STATUS_CHECK_INTERVAL / 60000}min | File emails : ${EMAIL_QUEUE_INTERVAL / 60000}min | Rappel aides : 7j | Relance stages : 1j`);
+  // Rappel de fin de stage au candidat (renouvellement) — toutes les heures, envois en journée
+  rappelRenouvellementDemarrage = setTimeout(() => runRenouvellementRappelJob(), RAPPEL_RENOUVELLEMENT_DEMARRAGE);
+  rappelRenouvellementInterval = setInterval(() => runRenouvellementRappelJob(), RAPPEL_RENOUVELLEMENT_INTERVAL);
+
+  console.log(`[JOBS] Statuts : ${STATUS_CHECK_INTERVAL / 60000}min | File emails : ${EMAIL_QUEUE_INTERVAL / 60000}min | Rappel aides : 7j | Relance stages : 1j | Rappel renouvellement : 1h`);
 };
 
 /**
@@ -63,6 +74,8 @@ const stopAllJobs = () => {
   if (aideReminderInterval) { clearInterval(aideReminderInterval); aideReminderInterval = null; }
   if (stageRelanceInterval) { clearInterval(stageRelanceInterval); stageRelanceInterval = null; }
   if (stageRelanceDemarrage) { clearTimeout(stageRelanceDemarrage); stageRelanceDemarrage = null; }
+  if (rappelRenouvellementInterval) { clearInterval(rappelRenouvellementInterval); rappelRenouvellementInterval = null; }
+  if (rappelRenouvellementDemarrage) { clearTimeout(rappelRenouvellementDemarrage); rappelRenouvellementDemarrage = null; }
   console.log('[JOBS] Taches planifiees arretees');
 };
 

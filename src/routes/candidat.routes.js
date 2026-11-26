@@ -133,7 +133,7 @@ router.get('/stages/:id/convention-renouvellement', candidatController.getConven
 
 /**
  * POST /api/candidat/stages/:id/renouvellement
- * Demander le renouvellement d'un stage (disponible une semaine avant la fin)
+ * Demander le renouvellement d'un stage (disponible deux semaines avant la fin)
  * Body: FormData avec dureeDemandee + fichier lettreRenouvellement (PDF, max 5 Mo)
  */
 router.post(

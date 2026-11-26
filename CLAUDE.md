@@ -244,14 +244,17 @@ pares-frontend/src/features/dashboard/
 
 - Le renouvellement est la **continuité / prolongation** de la demande de stage : nouveau stage (enfant,
   `stage_parent_idstage`) qui commence le lendemain de la fin du stage actuel.
-- Ouvert au candidat **une semaine** avant la fin (`DELAI_RENOUVELLEMENT_JOURS = 7`, candidat.service.js
-  + `peutRenouveler` dans candidat/stages/stages.ts). Stage déjà fini : autorisation admin de 7 jours.
+- Ouvert au candidat **deux semaines** avant la fin (`DELAI_RENOUVELLEMENT_JOURS = 14` depuis le 2026-11-26, avant 7 ;
+  candidat.service.js + `peutRenouveler` dans candidat/stages/stages.ts). Stage déjà fini : autorisation admin de 7 jours.
+  **Rappel au candidat** (`renouvellementRappelJob`, toutes les heures, envois de 8 h à 19 h) : notification in-app + push
+  `RAPPEL_RENOUVELLEMENT` dès l'ouverture puis **tous les deux jours** jusqu'au dernier jour, pour un stage EN_COURS
+  sans renouvellement demandé et sous la limite de 6 mois ; le dernier rappel (table `notifications`) évite les doublons.
 - **Un stage ne se renouvelle qu'une fois ; la suite de la chaîne part du dernier renouvellement** (2026-11-09),
   dans la limite de 6 mois continus. Candidat : `dejaRenouvele` (un enfant existe) masque le bouton — `renouvellement`
   décrit la demande **dont** le stage est issu (avant : il masquait le bouton sur la carte du renouvellement, donc
   aucun 2ᵉ renouvellement possible). Admin : « Autoriser 7j » dans le détail d'un renouvellement terminé / expiré
   (`stageNouveau.dejaRenouvele`, `stageNouveau.autorisationRenouvellement`) ; masqué sur un stage déjà renouvelé
-  (`chaine.dejaRenouvele`) et refusé par `autoriserRenouvellementStage`. Comme le 1er : bouton une semaine avant la
+  (`chaine.dejaRenouvele`) et refusé par `autoriserRenouvellementStage`. Comme le 1er : bouton deux semaines avant la
   fin du renouvellement, lettre seule, convention reprise du stage actuel (= celle du renouvellement précédent).
   Test : `stage.renouvellementSuivant.test.js`.
 - **Direction** : reprise de la demande de stage d'origine (remonte la chaîne si besoin).

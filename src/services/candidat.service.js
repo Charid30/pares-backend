@@ -23,7 +23,7 @@ const notifService = require('./notification.service');
 const { calculerDateFin, getDureeContinueCandidat, enrichirAvecChaine } = require('./stage.service');
 
 const DUREE_MAX_CONTINUE_MOIS = 6;   // Maximum 6 mois de stage continu
-const DELAI_RENOUVELLEMENT_JOURS = 7; // Renouvellement possible à partir d'une semaine avant la fin du stage
+const DELAI_RENOUVELLEMENT_JOURS = 14; // Renouvellement possible à partir de deux semaines avant la fin du stage (7 jours jusqu'au 2026-11-26)
 const REPOS_OBLIGATOIRE_MOIS = 1;    // 1 mois de repos minimum après 6 mois
 
 // =====================================================
@@ -967,7 +967,7 @@ const getConventionPourRenouvellement = async (candidatId, stageId) => {
 
 /**
  * Demander le renouvellement d'un stage
- * Disponible uniquement une semaine avant la fin du stage
+ * Disponible à partir de deux semaines avant la fin du stage (DELAI_RENOUVELLEMENT_JOURS)
  * @param {number} candidatId
  * @param {number} stageId
  * @param {object} data - { dureeDemandee }
@@ -1274,6 +1274,8 @@ const getMesRenouvellements = async (candidatId) => {
 };
 
 module.exports = {
+  DELAI_RENOUVELLEMENT_JOURS,
+  DUREE_MAX_CONTINUE_MOIS,
   getStatsCandidat,
   // Profil
   getProfilCandidat,
