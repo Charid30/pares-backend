@@ -33,6 +33,7 @@ const agentsActifs = async (directionIds = []) => {
     include: [
       { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
       { model: Direction, as: 'directionDirecte' },
+      { model: Direction, as: 'directions', through: { attributes: [] } },
     ],
   });
   const filtre = directionIds.length

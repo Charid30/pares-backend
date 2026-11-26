@@ -288,6 +288,12 @@ const login = async (identifier, password, rememberMe = false, ip = null) => {
           as: 'directionDirecte',
           attributes: ['iddirection', 'nom', 'accronyme'],
         },
+        {
+          model: Direction,
+          as: 'directions',
+          attributes: ['iddirection', 'nom', 'accronyme'],
+          through: { attributes: [] },
+        },
       ],
     },
   ];
@@ -462,6 +468,12 @@ const getProfile = async (userId) => {
             model: Direction,
             as: 'directionDirecte',
             attributes: ['iddirection', 'nom', 'accronyme'],
+          },
+          {
+            model: Direction,
+            as: 'directions',
+            attributes: ['iddirection', 'nom', 'accronyme'],
+            through: { attributes: [] },
           },
         ],
       },

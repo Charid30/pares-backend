@@ -90,6 +90,7 @@ const runStageRelanceJob = async () => {
         },
         { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
         { model: Direction, as: 'directionDirecte' },
+        { model: Direction, as: 'directions', through: { attributes: [] } },
       ],
     });
 

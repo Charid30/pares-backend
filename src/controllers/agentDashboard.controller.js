@@ -5,7 +5,7 @@
 // (ADMIN, AGENT_RH…), qui voit toutes les directions.
 const { Op } = require('sequelize');
 const { success, error } = require('../utils/response.util');
-const { getAgentDirections } = require('../utils/agentDirections.util');
+const { getAgentDirections, includesDirectionsAgent } = require('../utils/agentDirections.util');
 const {
   Stage,
   RenouvellementStage,
@@ -51,24 +51,15 @@ const chargerPermissions = async (user) => {
 };
 
 /**
- * Directions de l'agent, résolues comme dans chaque écran :
- * - stages (stage.service) : service → directions, sinon direction directe ;
- * - aides / offres / audiences : table agents_directions, sinon colonne historique.
+ * Directions de l'agent : règle commune à tous les écrans (agentDirections.util) —
+ * directions cochées, sinon celles de son service, sinon la direction historique.
  */
 const chargerDirections = async (agentId) => {
   if (!agentId) return { stage: [], autres: [], liste: [] };
-  const agent = await Agent.findByPk(agentId, {
-    include: [
-      { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
-      { model: Direction, as: 'directionDirecte' },
-    ],
-  });
+  const agent = await Agent.findByPk(agentId, { include: includesDirectionsAgent() });
   const liste = getAgentDirections(agent);
-  const rows = await AgentDirection.findAll({ where: { agent_idagents: agentId }, attributes: ['direction_iddirection'] });
-  const autres = rows.length
-    ? rows.map(r => r.direction_iddirection)
-    : (agent?.direction_iddirection ? [agent.direction_iddirection] : []);
-  return { stage: liste.map(d => d.iddirection), autres, liste };
+  const ids = liste.map(d => d.iddirection);
+  return { stage: ids, autres: ids, liste };
 };
 
 /** Filtre direction : null = pas de restriction ; liste vide → aucun résultat. */

@@ -103,6 +103,11 @@ pares-frontend/src/features/dashboard/
   pour les actions. Voir `getAgentContext`, `hasGlobalReadAccess`, `hasGlobalActionAccess` (stage.controller.js).
 - `resolveAgentDirection(agentId)` retourne `number[]` → filtrer avec `{ [Op.in]: directionIds }`.
 - Multi-directions : table `agents_directions` ; `agents.direction_iddirection` conservé (= 1re direction).
+  **Règle unique pour tous les modules** (2026-11-26, `utils/agentDirections.util.js`) : directions cochées
+  (`agents_directions`), sinon celles du service de l'agent, sinon la direction historique — `resolveAgentDirectionIds(agentId)`
+  ou `getAgentDirectionIds(agent)` chargé avec `includesDirectionsAgent()`. Un agent à plusieurs directions voit et traite
+  les stages, renouvellements, offres, aides et audiences de **toutes** ses directions (selon ses permissions). Avant, les
+  stages ne lisaient que le service ou la 1re direction. Test : `agent.multiDirections.test.js`.
 - Fichiers : `fileStorage.saveFile(buffer, nom, sousDossier)` (stockage disque, `*_path`) ;
   les colonnes BLOB ne sont qu'un repli pour les anciens fichiers (`fileStorage.readFile(path, blob)`).
   Rangement dans `uploads/` (2026-10-21) : `stages/` (pièces de la demande), `renouvellements/` (lettres de

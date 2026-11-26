@@ -4,6 +4,7 @@ const { success, error } = require('../utils/response.util');
 const auditService = require('../services/audit.service');
 const fileStorage = require('../utils/fileStorage.util');
 const { Agent, AgentDirection, Role, Permission } = require('../models');
+const { resolveAgentDirectionIds } = require('../utils/agentDirections.util');
 const { Op } = require('sequelize');
 
 const getUserRoles = (user) =>
@@ -22,14 +23,8 @@ const hasGlobalReadAccess = async (user) => {
 };
 
 // Retourne le tableau des directions de l'agent ([] = aucune restriction)
-const resolveAgentDirection = async (agentId) => {
-  if (!agentId) return [];
-  const rows = await AgentDirection.findAll({ where: { agent_idagents: agentId }, attributes: ['direction_iddirection'] });
-  if (rows.length > 0) return rows.map(r => r.direction_iddirection);
-  // Fallback sur la colonne legacy pour la rétrocompatibilité
-  const agent = await Agent.findOne({ where: { idagents: agentId, del: 0 }, attributes: ['direction_iddirection'] });
-  return agent?.direction_iddirection ? [agent.direction_iddirection] : [];
-};
+// Directions de l'agent : règle commune (directions cochées, sinon celles de son service) — agentDirections.util
+const resolveAgentDirection = resolveAgentDirectionIds;
 
 /**
  * Un agent ne valide, rejette ou redirige que les demandes de ses directions (2026-11-05) ; l'admin et les rôles à

@@ -43,6 +43,8 @@ test('stage qui finit dans 10 jours : un rappel (notification + push)', async ()
 test('pas de second rappel avant deux jours, puis un nouveau rappel deux jours plus tard', async () => {
   const stage = await creerStage(10);
   await runRenouvellementRappelJob(aHeure(10));
+  // Le rappel est daté de l'heure réelle : le ramener à l'heure simulée (sinon le test dépend de l'heure où il tourne)
+  await Notification.sequelize.query('UPDATE notifications SET createdAt = ? WHERE type = ?', { replacements: [aHeure(10), TYPE_NOTIF] });
   expect((await runRenouvellementRappelJob(aHeure(15))).envoyes).toBe(0);
   expect((await runRenouvellementRappelJob(aHeure(10, 1))).envoyes).toBe(0);
   expect((await runRenouvellementRappelJob(aHeure(10, 2))).envoyes).toBe(1);

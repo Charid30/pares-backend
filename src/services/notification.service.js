@@ -61,6 +61,7 @@ const agentsDestinataires = async (notificationType, directionId = null) => {
           },
           { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
           { model: Direction, as: 'directionDirecte' },
+          { model: Direction, as: 'directions', through: { attributes: [] } },
         ],
       }],
     }),

@@ -34,7 +34,7 @@ const dossierConvention = (stage) => (stage.stage_parent_idstage ? 'conventions/
 
 // Avant la convention, une demande de stage peut encore être refusée
 const STATUTS_AVANT_CONVENTION = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT', 'PROGRAMMATION_EN_COURS'];
-const { getAgentDirectionIds } = require('../utils/agentDirections.util');
+const { resolveAgentDirectionIds } = require('../utils/agentDirections.util');
 const fileStorage = require('../utils/fileStorage.util');
 const { calculerDateFin, calculerPeutAgir, calculerDureeEtRepos } = require('../utils/stageCalculs.util');
 
@@ -53,13 +53,7 @@ const assertAgentOwnsDirection = async (agentContext, directionId) => {
     throw new Error('Action non autorisée');
   }
 
-  const agent = await Agent.findByPk(agentContext.agentId, {
-    include: [
-      { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
-      { model: Direction, as: 'directionDirecte' },
-    ],
-  });
-  const directionIds = getAgentDirectionIds(agent);
+  const directionIds = await resolveAgentDirectionIds(agentContext.agentId);
 
   if (!directionId || !directionIds.includes(directionId)) {
     throw new Error('Action non autorisée : ce stage ne relève pas de votre direction');
@@ -258,13 +252,7 @@ const getAllStages = async (filters = {}, agentContext = null) => {
   // (cas d'un rôle "lecture globale" combiné à un rôle d'action limité à sa direction).
   let agentDirectionIds = [];
   if (agentContext && agentContext.agentId) {
-    const agent = await Agent.findByPk(agentContext.agentId, {
-      include: [
-        { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
-        { model: Direction, as: 'directionDirecte' },
-      ],
-    });
-    agentDirectionIds = getAgentDirectionIds(agent);
+    agentDirectionIds = await resolveAgentDirectionIds(agentContext.agentId);
   }
 
   // Filtrage par direction si l'agent n'est pas un rôle système (lecture)
@@ -500,13 +488,7 @@ const getStagesArchives = async (filters = {}, agentContext = null) => {
 
   let agentDirectionIds = [];
   if (agentContext && agentContext.agentId) {
-    const agent = await Agent.findByPk(agentContext.agentId, {
-      include: [
-        { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
-        { model: Direction, as: 'directionDirecte' },
-      ],
-    });
-    agentDirectionIds = getAgentDirectionIds(agent);
+    agentDirectionIds = await resolveAgentDirectionIds(agentContext.agentId);
   }
 
   if (agentContext && !agentContext.isSystemRole && agentContext.agentId) {
@@ -1247,13 +1229,7 @@ const getAllRenouvellements = async (filters = {}, agentContext = null) => {
   // Directions de l'agent — filtrage de la liste (rôle non-système) et calcul de peutAgir
   let agentDirectionIds = [];
   if (agentContext && agentContext.agentId) {
-    const agent = await Agent.findByPk(agentContext.agentId, {
-      include: [
-        { model: Service, as: 'service', include: [{ model: Direction, as: 'directions', through: { attributes: [] } }] },
-        { model: Direction, as: 'directionDirecte' },
-      ],
-    });
-    agentDirectionIds = getAgentDirectionIds(agent);
+    agentDirectionIds = await resolveAgentDirectionIds(agentContext.agentId);
   }
 
   const filtreDirection = !!(agentContext && !agentContext.isSystemRole && agentContext.agentId);
