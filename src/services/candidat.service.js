@@ -458,6 +458,7 @@ const getMesDemandesStage = async (candidatId) => {
       casierJudiciaire_filename: stage.casierJudiciaire_filename,
       lettreMotivation_filename: stage.lettreMotivation_filename,
       lettreRecommandation_filename: stage.lettreRecommandation_filename,
+      aLettreRecommandation: aLettreRecommandation(stage),
       dernierDiplome_filename: stage.dernierDiplome_filename,
       // Demande de modification en attente (null si aucune)
       demandeModifEnCours: demandeModif
@@ -694,7 +695,91 @@ const soumettreDemandeStage = async (candidatId, data, files) => {
   };
 };
 
+// Changement de type par le candidat (2026-11-27) : seulement avant l'approbation
+const STATUTS_TYPE_MODIFIABLE = ['EN_ATTENTE', 'EN_COURS_DE_TRAITEMENT'];
+const NIVEAUX_PAR_TYPE = {
+  SOUTENANCE: ['BAC_PRO', 'LICENCE', 'MASTER', 'DOCTORAT'],
+  PERFECTIONNEMENT: ['CAP', 'BEPC', 'BEP', 'BAC', 'LICENCE', 'MASTER', 'DOCTORAT'],
+};
+
+/** Le dossier contient-il déjà une lettre de recommandation (même masquée en perfectionnement) ? */
+const aLettreRecommandation = (stage) => !!(
+  stage.getDataValue('lettreRecommandation_path') || stage.getDataValue('lettreRecommandation_filename')
+);
+
 /**
+ * Le candidat change le type de sa demande de stage (soutenance ↔ perfectionnement), avant l'approbation.
+ * - Vers SOUTENANCE : la lettre de recommandation est demandée si le dossier n'en a pas déjà une.
+ * - Vers PERFECTIONNEMENT : la lettre déjà déposée est conservée mais masquée (getter du modèle Stage).
+ * - Le niveau doit appartenir à la liste du nouveau type (BAC PRO : soutenance ; CAP à BAC : perfectionnement).
+ * Agents de la direction prévenus ; journal d'audit STAGE_TYPE_MODIFIE (enregistré par le contrôleur).
+ * @returns {Promise<{ stage: object, ancienType: string }>}
+ */
+const changerTypeStage = async (candidatId, stageId, data, lettreRecommandation = null) => {
+  const stage = await Stage.findOne({
+    where: { idstage: stageId, candidats_idcandidats: candidatId, del: 0 },
+    attributes: { exclude: ['cv', 'cnib', 'casierJudiciaire', 'lettreMotivation', 'lettreRecommandation', 'dernierDiplome'] },
+  });
+  if (!stage) throw new Error('Demande de stage non trouvée');
+  if (stage.stage_parent_idstage || stage.estRenouvellement) {
+    throw new Error('Le type d\'un renouvellement ne peut pas être modifié');
+  }
+  if (!STATUTS_TYPE_MODIFIABLE.includes(stage.statusStage)) {
+    throw new Error('Le type ne peut plus être modifié : votre demande a déjà été examinée');
+  }
+
+  const nouveauType = data.typeStage;
+  if (!NIVEAUX_PAR_TYPE[nouveauType]) throw new Error('Type de stage invalide');
+  if (nouveauType === stage.typeStage) throw new Error('Votre demande est déjà de ce type');
+
+  const niveau = data.niveau || stage.niveau;
+  if (!niveau || !NIVEAUX_PAR_TYPE[nouveauType].includes(niveau)) {
+    throw new Error(nouveauType === 'SOUTENANCE'
+      ? 'Choisissez un niveau valable pour un stage de soutenance (BAC PRO, Licence, Master ou Doctorat)'
+      : 'Choisissez un niveau valable pour un stage de perfectionnement');
+  }
+
+  const maj = { typeStage: nouveauType, niveau, lastmodifiedDate: new Date() };
+  let cheminLettre = null;
+  if (nouveauType === 'SOUTENANCE') {
+    if (lettreRecommandation) {
+      cheminLettre = fileStorage.saveFile(lettreRecommandation.buffer, lettreRecommandation.originalname, 'stages');
+      Object.assign(maj, {
+        lettreRecommandation_path: cheminLettre,
+        lettreRecommandation: null,
+        lettreRecommandation_filename: lettreRecommandation.originalname,
+        lettreRecommandation_size: lettreRecommandation.size,
+      });
+    } else if (!aLettreRecommandation(stage)) {
+      throw new Error('La lettre de recommandation est requise pour un stage de soutenance');
+    }
+  }
+
+  const ancienType = stage.typeStage;
+  try {
+    await stage.update(maj);
+  } catch (err) {
+    if (cheminLettre) fileStorage.deleteFile(cheminLettre);
+    throw err;
+  }
+
+  const candidat = await Candidat.findByPk(candidatId, { attributes: ['idcandidats', 'nom', 'prenom'] });
+  notifService.onTypeStageModifie(candidat, stage, ancienType)
+    .catch(err => console.error('[Stage] Notification changement de type :', err.message));
+
+  return {
+    stage: {
+      idstage: stage.idstage,
+      typeStage: stage.typeStage,
+      niveau: stage.niveau,
+      statusStage: stage.statusStage,
+      lettreRecommandation_filename: stage.lettreRecommandation_filename,
+      aLettreRecommandation: aLettreRecommandation(stage),
+    },
+    ancienType,
+  };
+};
+
 /**
  * Remonte la chaîne parent pour trouver le stage racine (stage initial).
  * Un renouvellement pointe vers son parent via stage_parent_idstage.
@@ -1288,6 +1373,7 @@ module.exports = {
   getAttestationStage,
   getMesDemandesStage,
   soumettreDemandeStage,
+  changerTypeStage,
   soumettreRapportStage,
   getEtatRapportChaine,
   getRapportByStageId,

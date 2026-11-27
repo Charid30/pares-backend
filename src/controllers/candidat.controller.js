@@ -1,6 +1,7 @@
 // src/controllers/candidat.controller.js
 const candidatService = require('../services/candidat.service');
 const stageService = require('../services/stage.service');
+const auditService = require('../services/audit.service');
 const { success, error } = require('../utils/response.util');
 
 // =====================================================
@@ -157,6 +158,30 @@ const getMesDemandesStage = async (req, res) => {
     return success(res, demandes, 'Demandes de stage récupérées avec succès');
   } catch (err) {
     return error(res, err.message, 500);
+  }
+};
+
+/**
+ * Changer le type de sa demande de stage (soutenance ↔ perfectionnement), avant l'approbation
+ * PUT /api/candidat/stages/:id/type — FormData : typeStage, niveau, lettreRecommandation (vers soutenance)
+ */
+const changerTypeStage = async (req, res) => {
+  try {
+    const lettre = req.files?.lettreRecommandation?.[0] || null;
+    const { stage, ancienType } = await candidatService.changerTypeStage(
+      req.user.candidatId, parseInt(req.params.id, 10), req.body, lettre
+    );
+    await auditService.log({
+      agentNom: req.user.username || 'Candidat',
+      action: 'STAGE_TYPE_MODIFIE',
+      module: 'STAGE',
+      entityId: stage.idstage,
+      details: { candidatId: req.user.candidatId, ancienType, nouveauType: stage.typeStage, niveau: stage.niveau },
+      ip: req.ip,
+    });
+    return success(res, stage, 'Type de la demande de stage modifié');
+  } catch (err) {
+    return error(res, err.message, 400);
   }
 };
 
@@ -382,6 +407,7 @@ const getMesRenouvellements = async (req, res) => {
 };
 
 module.exports = {
+  changerTypeStage,
   getStats,
   // Profil
   getProfil,

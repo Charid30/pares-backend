@@ -208,6 +208,13 @@ pares-frontend/src/features/dashboard/
   5. EXPIRE → rapport → TERMINE.
   - **Refus** (motif + pièces non conformes) possible **tant que la convention n'est pas jointe** (bloqué ensuite côté serveur).
   - L'admin garde le raccourci : accepter directement avec la convention.
+  - **Changement de type par le candidat** (2026-11-27, `PUT /candidat/stages/:id/type`, `changerTypeStage`) : soutenance ↔
+    perfectionnement, **avant l'approbation** seulement (En attente / En traitement), demande initiale uniquement. Le niveau doit
+    appartenir au nouveau type ; vers la soutenance, la lettre de recommandation est exigée si le dossier n'en a pas. Vers le
+    perfectionnement, la lettre est **conservée mais masquée** partout (getter de `lettreRecommandation_filename` dans le modèle
+    `Stage`) et réapparaît au retour en soutenance (`aLettreRecommandation` dit si elle existe). Agents de la direction prévenus
+    (`onTypeStageModifie`), journal `STAGE_TYPE_MODIFIE`. Écran : lien « Modifier » sur le type, dans le détail de « Mes stages ».
+    Test : `candidat.changerTypeStage.test.js`.
   - **Retour « En traitement »** (2026-11-18, **ADMIN seul**, `PUT /stages/:id/annuler-approbation`) : une demande « En cours de
     programmation » sans convention revient « En traitement » (date proposée et maître de stage effacés, candidat notifié, journal
     `STAGE_APPROBATION_ANNULEE`) ; renouvellements exclus (ils ont leur « Annuler l'approbation »). Test : `stage.annulerApprobation.test.js`.

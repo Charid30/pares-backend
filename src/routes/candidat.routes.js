@@ -94,6 +94,17 @@ router.post(
 );
 
 /**
+ * PUT /api/candidat/stages/:id/type
+ * Changer le type de sa demande (soutenance ↔ perfectionnement) tant qu'elle n'est pas approuvée
+ * Body: FormData avec typeStage, niveau ; fichier lettreRecommandation (vers soutenance, si absente du dossier)
+ */
+router.put(
+  '/stages/:id/type',
+  upload.fields([{ name: 'lettreRecommandation', maxCount: 1 }]),
+  candidatController.changerTypeStage
+);
+
+/**
  * GET /api/candidat/stages/:id/rapport
  * Récupérer le rapport d'un stage
  */

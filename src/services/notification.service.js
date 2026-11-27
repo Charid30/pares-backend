@@ -397,6 +397,24 @@ const onNouvelleDemandeStage = async (candidat, stage) => {
   }, stage.direction_iddirection);
 };
 
+/** Prévenir les agents de la direction que le candidat a changé le type de sa demande (soutenance ↔ perfectionnement). */
+const onTypeStageModifie = async (candidat, stage, ancienType) => {
+  const libelle = (t) => (t === 'SOUTENANCE' ? 'Soutenance' : 'Perfectionnement');
+  const nomCandidat = `${candidat.prenom} ${candidat.nom}`;
+  const html = buildAgentNotifHtml('Stage', 'Type de demande de stage modifié', [
+    { label: 'Candidat', value: nomCandidat },
+    { label: 'Domaine', value: stage.domaineStage },
+    { label: 'Ancien type', value: libelle(ancienType) },
+    { label: 'Nouveau type', value: libelle(stage.typeStage) },
+  ]);
+  await notifyAgents('STAGE', 'Type de demande de stage modifié', html, {
+    type: 'STAGE_TYPE_MODIFIE',
+    titre: 'Type de demande de stage modifié',
+    message: `${nomCandidat} a changé sa demande de stage (${stage.domaineStage}) : ${libelle(ancienType)} → ${libelle(stage.typeStage)}.`,
+    link: `${FRONTEND}/dashboard/agent/stages?open=${stage.idstage}`,
+  }, stage.direction_iddirection);
+};
+
 /** Prévenir les agents de la nouvelle direction qu'une demande de stage vient de leur être transférée. */
 const onStageTransfere = async (candidat, stage, direction) => {
   const nomCandidat = `${candidat.prenom} ${candidat.nom}`;
@@ -756,6 +774,7 @@ module.exports = {
   sendDocumentARemplacerStage,
   onNouvelleDemandeStage,
   onStageTransfere,
+  onTypeStageModifie,
   onNouvelleDemandeOffre,
   onNouvelleDemandeAide,
   onNouvelleDemandeAudience,

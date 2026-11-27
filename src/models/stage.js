@@ -118,6 +118,13 @@ module.exports = (sequelize) => {
     },
     lettreRecommandation_filename: {
       type: DataTypes.STRING(255),
+      // Lettre de recommandation : pièce du stage de SOUTENANCE seulement. Si le candidat passe sa demande en
+      // perfectionnement (2026-11-27), la lettre déjà déposée est conservée mais masquée partout (les écrans
+      // n'affichent un document que s'il a un nom de fichier) ; elle réapparaît s'il repasse en soutenance.
+      get() {
+        if (this.getDataValue('typeStage') === 'PERFECTIONNEMENT') return null;
+        return this.getDataValue('lettreRecommandation_filename');
+      },
     },
     lettreRecommandation_size: {
       type: DataTypes.INTEGER,
