@@ -20,11 +20,13 @@ const {
 const { estEmailJetable } = require('../utils/emailsJetables');
 const emailService = require('./email.service');
 const notifService = require('./notification.service');
-const { calculerDateFin, getDureeContinueCandidat, enrichirAvecChaine } = require('./stage.service');
+const { calculerDateFin, enrichirAvecChaine } = require('./stage.service');
+const { verifierLimitesStage, MAX_MOIS_PAR_SERVICE, STATUTS_STAGE_ACCEPTE } = require('../utils/limitesStage.util');
 
-const DUREE_MAX_CONTINUE_MOIS = 6;   // Maximum 6 mois de stage continu
+// Limites de durée (2026-11-27) : 6 mois par service à vie, 6 mois par année civile, pause de 2 ou 3 mois
+// entre deux stages — voir utils/limitesStage.util.js. Ancien nom gardé pour les appels existants.
+const DUREE_MAX_CONTINUE_MOIS = MAX_MOIS_PAR_SERVICE;
 const DELAI_RENOUVELLEMENT_JOURS = 14; // Renouvellement possible à partir de deux semaines avant la fin du stage (7 jours jusqu'au 2026-11-26)
-const REPOS_OBLIGATOIRE_MOIS = 1;    // 1 mois de repos minimum après 6 mois
 
 // =====================================================
 // PROFIL CANDIDAT
@@ -540,30 +542,6 @@ const soumettreDemandeStage = async (candidatId, data, files) => {
     throw new Error(messages[stageActif.statusStage] || 'Vous avez déjà un stage actif');
   }
 
-  // Vérifier la règle des 6 mois continus
-  // Si le candidat a terminé une chaîne récemment, vérifier s'il doit se reposer
-  const dureeInfo = await getDureeContinueCandidat(candidatId, null);
-  if (dureeInfo.dureeTotaleJours > 0 && dureeInfo.dureeTotaleMois >= DUREE_MAX_CONTINUE_MOIS) {
-    const dateMin = dureeInfo.dateMinRepos;
-    const aujourd = new Date().toISOString().split('T')[0];
-    if (dateMin && aujourd < dateMin) {
-      throw new Error(
-        `Vous avez atteint la limite de ${DUREE_MAX_CONTINUE_MOIS} mois de stage continu. ` +
-        `Une période de repos de ${REPOS_OBLIGATOIRE_MOIS} mois est obligatoire. ` +
-        `Vous pourrez soumettre une nouvelle demande à partir du ${new Date(dateMin).toLocaleDateString('fr-FR')}.`,
-        { dateMinRepos: dateMin }
-      );
-    }
-  }
-
-  // Vérifier que la date de début souhaitée respecte le repos obligatoire si applicable
-  if (dureeInfo.dateMinRepos && data.dateDebutSouhaitee < dureeInfo.dateMinRepos) {
-    throw new Error(
-      `La date de début souhaitée doit être au minimum le ${new Date(dureeInfo.dateMinRepos).toLocaleDateString('fr-FR')} ` +
-      `(après la période de repos obligatoire de ${REPOS_OBLIGATOIRE_MOIS} mois).`
-    );
-  }
-
   // Préparer les données du stage
   if (!data.direction_iddirection) {
     throw new Error('La direction est requise pour soumettre une demande de stage');
@@ -571,6 +549,14 @@ const soumettreDemandeStage = async (candidatId, data, files) => {
   if (!data.service_idservice) {
     throw new Error('Le service est requis pour soumettre une demande de stage');
   }
+
+  // Limites de durée : 6 mois par service à vie, 6 mois par année civile, pause après le dernier stage
+  verifierLimitesStage({
+    stages: await chargerStagesAcceptes(candidatId),
+    serviceId: parseInt(data.service_idservice, 10),
+    debut: data.dateDebutSouhaitee,
+    dureeMois: parseInt(data.dureeStage, 10),
+  });
   if (!data.domaineStage?.trim()) {
     throw new Error('Le domaine de stage est requis');
   }
@@ -693,6 +679,33 @@ const soumettreDemandeStage = async (candidatId, data, files) => {
     statusStage: stage.statusStage,
     createdDate: stage.createdDate,
   };
+};
+
+/**
+ * Stages acceptés du candidat (convention jointe), au format attendu par limitesStage.util :
+ * [{ serviceId, debut, fin }]. Un renouvellement sans service reprend celui de son stage d'origine.
+ * @param {number} candidatId
+ * @param {{ transaction?: object }} [options]
+ */
+const chargerStagesAcceptes = async (candidatId, { transaction } = {}) => {
+  const tous = await Stage.findAll({
+    where: { candidats_idcandidats: candidatId, del: 0 },
+    attributes: ['idstage', 'stage_parent_idstage', 'service_idservice', 'statusStage', 'dateDebutEffective', 'dateFinEffective', 'dureeStage'],
+    transaction,
+  });
+  const parId = new Map(tous.map(s => [s.idstage, s]));
+  const serviceDe = (s) => {
+    let x = s;
+    for (let i = 0; x && !x.service_idservice && x.stage_parent_idstage && i < 20; i++) x = parId.get(x.stage_parent_idstage);
+    return x?.service_idservice || null;
+  };
+  return tous
+    .filter(s => STATUTS_STAGE_ACCEPTE.includes(s.statusStage) && s.dateDebutEffective)
+    .map(s => ({
+      serviceId: serviceDe(s),
+      debut: s.dateDebutEffective,
+      fin: s.dateFinEffective || calculerDateFin(s.dateDebutEffective, s.dureeStage || 1),
+    }));
 };
 
 // Changement de type par le candidat (2026-11-27) : seulement avant l'approbation
@@ -1136,26 +1149,6 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
     throw new Error('La lettre de demande de renouvellement est obligatoire');
   }
 
-  // ─── Règle 6 mois : vérifier que durée chaîne + durée demandée ≤ 6 mois ───
-  const dureeDemandeeN = parseInt(data.dureeDemandee) || stage.dureeStage;
-
-  // Calculer la durée déjà consommée dans la chaîne actuelle
-  const rootId = stage.stage_parent_idstage || stageId;
-  const dureeChaine = await getDureeContinueCandidat(candidatId, rootId);
-
-  // Total si ce renouvellement est accepté = durée chaîne actuelle (en mois) + durée demandée
-  const dureeChaineMois = dureeChaine.dureeTotaleMois || 0;
-  const totalApresRenouvellement = dureeChaineMois + dureeDemandeeN;
-
-  if (totalApresRenouvellement > DUREE_MAX_CONTINUE_MOIS) {
-    const moisDisponibles = Math.max(0, Math.floor((DUREE_MAX_CONTINUE_MOIS - dureeChaineMois) * 10) / 10);
-    throw new Error(
-      `Ce renouvellement dépasserait la limite de ${DUREE_MAX_CONTINUE_MOIS} mois de stage continu. ` +
-      `Vous avez déjà ${dureeChaineMois} mois cumulés. ` +
-      `Durée maximum disponible : ${moisDisponibles} mois.`
-    );
-  }
-  // ─────────────────────────────────────────────────────────────────────────
 
   const dureeDemandee = parseInt(data.dureeDemandee) || stage.dureeStage;
 
@@ -1163,6 +1156,7 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
   const dateDebutRenouvellement = new Date(stage.dateFinEffective);
   dateDebutRenouvellement.setDate(dateDebutRenouvellement.getDate() + 1);
 
+  // (contrôle des limites de durée plus bas, une fois le service de la chaîne connu)
   // Le renouvellement reprend la direction/service de la demande de stage d'origine :
   // si le stage actuel n'en a pas (ancien renouvellement incomplet), on remonte la chaîne.
   let directionId = stage.direction_iddirection;
@@ -1177,6 +1171,24 @@ const demanderRenouvellement = async (candidatId, stageId, data, file) => {
       parentId = parent.stage_parent_idstage;
     }
   }
+  if (!serviceId && stage.stage_parent_idstage) {
+    let parentId = stage.stage_parent_idstage;
+    while (parentId && !serviceId) {
+      const parent = await Stage.findOne({ where: { idstage: parentId, del: 0 }, attributes: ['service_idservice', 'stage_parent_idstage'] });
+      if (!parent) break;
+      serviceId = parent.service_idservice;
+      parentId = parent.stage_parent_idstage;
+    }
+  }
+
+  // Limites de durée (6 mois par service à vie, 6 mois par année civile) ; pas de pause : le renouvellement prolonge le stage
+  verifierLimitesStage({
+    stages: await chargerStagesAcceptes(candidatId),
+    serviceId,
+    debut: dateDebutRenouvellement.toISOString().split('T')[0],
+    dureeMois: dureeDemandee,
+    verifierPause: false,
+  });
 
   // Le stage enfant et la ligne renouvellement_stage sont créés dans une même transaction :
   // sans elle, un échec à la 2e étape laissait un stage orphelin, invisible dans les écrans
@@ -1361,6 +1373,7 @@ const getMesRenouvellements = async (candidatId) => {
 module.exports = {
   DELAI_RENOUVELLEMENT_JOURS,
   DUREE_MAX_CONTINUE_MOIS,
+  chargerStagesAcceptes,
   getStatsCandidat,
   // Profil
   getProfilCandidat,

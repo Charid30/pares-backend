@@ -2,13 +2,14 @@
 // Rappel au candidat de la fin prochaine de son stage (demandé le 2026-11-26) :
 // dès l'ouverture du renouvellement (DELAI_RENOUVELLEMENT_JOURS = 14 jours avant la fin) puis tous les deux jours,
 // jusqu'au dernier jour du stage. Notification in-app, qui déclenche aussi le push.
-// Pas de rappel si le stage est déjà renouvelé (une demande existe) ou si la limite de 6 mois continus est atteinte.
+// Pas de rappel si le stage est déjà renouvelé (une demande existe) ou si un renouvellement d'un mois dépasserait
+// les limites de durée (6 mois par service, 6 mois par année civile — limitesStage.util).
 // Vérification toutes les heures, envois seulement en journée ; le dernier rappel (table notifications) évite les doublons.
 const { Op } = require('sequelize');
 const { Stage, Notification } = require('../models');
 const inapp = require('../services/inapp.service');
-const { getDureeContinueCandidat } = require('../services/stage.service');
-const { DELAI_RENOUVELLEMENT_JOURS, DUREE_MAX_CONTINUE_MOIS } = require('../services/candidat.service');
+const { DELAI_RENOUVELLEMENT_JOURS, chargerStagesAcceptes } = require('../services/candidat.service');
+const { verifierLimitesStage } = require('../utils/limitesStage.util');
 
 const TYPE_NOTIF = 'RAPPEL_RENOUVELLEMENT';
 const INTERVALLE_RAPPEL_JOURS = 2;
@@ -31,6 +32,37 @@ const texteRappel = (stage, joursRestants) => {
   return { titre, message };
 };
 
+/** Service de la chaîne (un renouvellement sans service reprend celui de son stage d'origine). */
+const serviceDeLaChaine = async (stage) => {
+  let serviceId = stage.service_idservice;
+  let parentId = stage.stage_parent_idstage;
+  for (let i = 0; !serviceId && parentId && i < 20; i++) {
+    const parent = await Stage.findByPk(parentId, { attributes: ['service_idservice', 'stage_parent_idstage'] });
+    if (!parent) break;
+    serviceId = parent.service_idservice;
+    parentId = parent.stage_parent_idstage;
+  }
+  return serviceId;
+};
+
+/** Un renouvellement d'un mois respecterait-il les limites de durée ? */
+const renouvellementPossible = async (stage) => {
+  const debut = new Date(stage.dateFinEffective);
+  debut.setDate(debut.getDate() + 1);
+  try {
+    verifierLimitesStage({
+      stages: await chargerStagesAcceptes(stage.candidats_idcandidats),
+      serviceId: await serviceDeLaChaine(stage),
+      debut: debut.toISOString().split('T')[0],
+      dureeMois: 1,
+      verifierPause: false,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * @param {Date} [maintenant] - injectable pour les tests
  * @returns {Promise<{ envoyes: number, ignores: number }>}
@@ -50,7 +82,7 @@ const runRenouvellementRappelJob = async (maintenant = new Date()) => {
         statusStage: 'EN_COURS',
         dateFinEffective: { [Op.gte]: aujourdhui, [Op.lte]: finFenetre },
       },
-      attributes: ['idstage', 'candidats_idcandidats', 'stage_parent_idstage', 'domaineStage', 'dateFinEffective'],
+      attributes: ['idstage', 'candidats_idcandidats', 'stage_parent_idstage', 'service_idservice', 'domaineStage', 'dateFinEffective'],
     });
 
     for (const stage of stages) {
@@ -59,9 +91,8 @@ const runRenouvellementRappelJob = async (maintenant = new Date()) => {
         const enfant = await Stage.count({ where: { stage_parent_idstage: stage.idstage, del: 0 } });
         if (enfant) { bilan.ignores += 1; continue; }
 
-        // Limite de 6 mois continus atteinte : le renouvellement serait refusé
-        const chaine = await getDureeContinueCandidat(stage.candidats_idcandidats, stage.stage_parent_idstage || stage.idstage);
-        if ((chaine?.dureeTotaleMois || 0) >= DUREE_MAX_CONTINUE_MOIS) { bilan.ignores += 1; continue; }
+        // Limites de durée : même un renouvellement d'un mois serait refusé → pas de rappel
+        if (!(await renouvellementPossible(stage))) { bilan.ignores += 1; continue; }
 
         // Un rappel tous les deux jours au plus
         const recent = await Notification.findOne({

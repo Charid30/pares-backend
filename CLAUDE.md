@@ -224,6 +224,18 @@ pares-frontend/src/features/dashboard/
   - Notifications au candidat (in-app + push) à chaque étape ; **relance des agents** (`stageRelanceJob`) : demandes
     bloquées depuis 7 jours en traitement (approbateurs) ou en programmation (RH), au plus une fois par semaine,
     e-mail + push.
+- **Limites de durée** (validées le 2026-11-27, remplacent « 6 mois continus + 1 mois de repos » ; `utils/limitesStage.util.js`,
+  appliquées au dépôt d'une demande et au renouvellement, `chargerStagesAcceptes` dans candidat.service.js) :
+  1. **6 mois par service, à vie** (service choisi dans la demande ; un renouvellement reprend celui de son stage d'origine) :
+     après 6 mois dans un service, il est fermé définitivement au candidat ; sinon refus avec le reste (« il vous reste 2 mois »).
+  2. **6 mois par année civile**, tous services confondus (un stage à cheval compte ses jours dans chaque année).
+  3. **Pause** avant toute nouvelle demande, comptée depuis la fin du dernier stage (non renouvelé) : **3 mois** si le candidat a
+     atteint 6 mois dans le service de ce stage, sinon **2 mois** — le dépôt est refusé pendant la pause. Pas de pause pour un
+     renouvellement.
+  Seuls comptent les stages **acceptés** (convention jointe : accepté, en cours, suspendu, expiré, rapport soumis, terminé),
+  renouvellements compris, selon leurs dates réelles ; mois arrondis au demi-mois (01/01 → 30/06 = 6 mois).
+  Tests : `utils/__tests__/limitesStage.test.js`, `candidat.service.test.js`. `getDureeContinueCandidat` (stage.service.js) ne sert
+  plus qu'aux écrans de suivi (durée de la chaîne).
 - **Un stage n'est validé que lorsque sa convention est jointe.** Statut après convention :
   **ACCEPTE** si la date de début n'est pas arrivée, **EN_COURS** si elle l'est (`statutApresConvention`).
   Le job n'active (ACCEPTE → EN_COURS) **que les stages ayant une convention**.
@@ -264,9 +276,9 @@ pares-frontend/src/features/dashboard/
   candidat.service.js + `peutRenouveler` dans candidat/stages/stages.ts). Stage déjà fini : autorisation admin de 7 jours.
   **Rappel au candidat** (`renouvellementRappelJob`, toutes les heures, envois de 8 h à 19 h) : notification in-app + push
   `RAPPEL_RENOUVELLEMENT` dès l'ouverture puis **tous les deux jours** jusqu'au dernier jour, pour un stage EN_COURS
-  sans renouvellement demandé et sous la limite de 6 mois ; le dernier rappel (table `notifications`) évite les doublons.
+  sans renouvellement demandé et quand un renouvellement d'un mois respecterait les limites de durée ; le dernier rappel (table `notifications`) évite les doublons.
 - **Un stage ne se renouvelle qu'une fois ; la suite de la chaîne part du dernier renouvellement** (2026-11-09),
-  dans la limite de 6 mois continus. Candidat : `dejaRenouvele` (un enfant existe) masque le bouton — `renouvellement`
+  dans les limites de durée (6 mois par service, 6 mois par année). Candidat : `dejaRenouvele` (un enfant existe) masque le bouton — `renouvellement`
   décrit la demande **dont** le stage est issu (avant : il masquait le bouton sur la carte du renouvellement, donc
   aucun 2ᵉ renouvellement possible). Admin : « Autoriser 7j » dans le détail d'un renouvellement terminé / expiré
   (`stageNouveau.dejaRenouvele`, `stageNouveau.autorisationRenouvellement`) ; masqué sur un stage déjà renouvelé
@@ -334,8 +346,8 @@ pares-frontend/src/features/dashboard/
 ## Tests
 
 - Backend : `npx jest --runInBand` (SQLite en mémoire via `resetDb`, mocker `../../utils/fileStorage.util`).
-- 3 échecs connus et antérieurs, sans lien avec le renouvellement : `candidat.service.test.js` (date de repos
-  écrite en dur) et `user.service.test.js` (anciens messages du multi-directions).
+- 2 échecs connus et antérieurs : `user.service.test.js` (anciens messages du multi-directions). Ceux de
+  `candidat.service.test.js` (date de repos écrite en dur) ont disparu avec les nouvelles limites de durée (2026-11-27).
 - Frontend : `npx ng build --configuration development` pour vérifier la compilation.
 
 ---
@@ -369,7 +381,7 @@ pour tout ce qui touche la base). Après chaque suppression : `npx ng build` + `
 
 ### Autres points en attente
 
-- 3 tests backend obsolètes à mettre à jour (voir « Tests »).
+- 2 tests backend obsolètes à mettre à jour (voir « Tests »).
 - « Mes stages » côté candidat affiche encore le stage du renouvellement comme une carte à part (et le compte
   dans le total) — à décider avec l'utilisateur (regrouper la chaîne sur une seule carte ?).
 - Notifications candidat manquantes : renouvellement « en traitement », convention du renouvellement jointe.

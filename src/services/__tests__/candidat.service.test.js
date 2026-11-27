@@ -1,7 +1,7 @@
 // Test d'intégration : soumission d'une demande de stage par un candidat — la
 // règle la plus fragile de candidat.service.js, à l'intersection de plusieurs
 // vérifications (stage actif existant, fichiers obligatoires, et surtout la
-// règle des 6 mois continus qui remonte une vraie chaîne de stages en base).
+// limites de durée — 6 mois par service, 6 mois par année, pause — sur de vrais stages en base).
 jest.mock('../email.service');
 jest.mock('../notification.service');
 jest.mock('../../utils/fileStorage.util', () => ({
@@ -104,64 +104,50 @@ describe('soumettreDemandeStage', () => {
     ).rejects.toThrow('La direction est requise');
   });
 
-  describe('règle des 6 mois continus', () => {
-    test('bloque la nouvelle demande pendant la période de repos obligatoire', async () => {
-      const candidat = await creerCandidat();
-      const { direction, service } = await creerDirectionEtService();
+  describe('limites de durée (6 mois par service à vie, 6 mois par année, pause)', () => {
+    const iso = (d) => d.toISOString().split('T')[0];
+    const debutAnneeProchaine = `${new Date().getFullYear() + 1}-03-01`;
 
-      // Chaîne de stage terminée il y a 5 jours, ayant duré exactement 6 mois.
+    // Stage terminé de 6 mois dans `service`, fini il y a `moisDepuisFin` mois (ou jours si `enJours`)
+    const creerStageTermine = async (candidat, direction, service, { moisDepuisFin = 0, joursDepuisFin = 0 } = {}) => {
       const dateFin = new Date();
-      dateFin.setDate(dateFin.getDate() - 5);
+      dateFin.setMonth(dateFin.getMonth() - moisDepuisFin);
+      dateFin.setDate(dateFin.getDate() - joursDepuisFin);
       const dateDebut = new Date(dateFin);
       dateDebut.setMonth(dateDebut.getMonth() - 6);
-
-      await Stage.create({
-        candidats_idcandidats: candidat.idcandidats,
-        typeStage: 'SOUTENANCE',
-        domaineStage: 'Stage précédent',
-        dureeStage: 6,
-        dateDebutSouhaitee: dateDebut.toISOString().split('T')[0],
-        dateDebutEffective: dateDebut.toISOString().split('T')[0],
-        dateFinEffective: dateFin.toISOString().split('T')[0],
-        direction_iddirection: direction.iddirection,
-        service_idservice: service.idservice,
-        statusStage: 'TERMINE',
+      dateDebut.setDate(dateDebut.getDate() + 1);
+      return Stage.create({
+        candidats_idcandidats: candidat.idcandidats, typeStage: 'SOUTENANCE', domaineStage: 'Stage précédent', dureeStage: 6,
+        dateDebutSouhaitee: iso(dateDebut), dateDebutEffective: iso(dateDebut), dateFinEffective: iso(dateFin),
+        direction_iddirection: direction.iddirection, service_idservice: service.idservice, statusStage: 'TERMINE',
       });
+    };
+
+    test('après 6 mois dans un service : 3 mois de pause avant un autre service', async () => {
+      const candidat = await creerCandidat();
+      const { direction, service } = await creerDirectionEtService();
+      const autreService = await Service.create({ accronyme: 'RES', description: 'Réseau' });
+      await creerStageTermine(candidat, direction, service, { joursDepuisFin: 5 });
 
       await expect(
-        candidatService.soumettreDemandeStage(candidat.idcandidats, demandeValide(direction, service), fichiersComplets())
-      ).rejects.toThrow('limite de 6 mois de stage continu');
+        candidatService.soumettreDemandeStage(candidat.idcandidats,
+          demandeValide(direction, autreService, { dateDebutSouhaitee: debutAnneeProchaine }), fichiersComplets())
+      ).rejects.toThrow('une pause de 3 mois est obligatoire');
     });
 
-    test('autorise la nouvelle demande une fois la période de repos passée', async () => {
+    test('pause passée : un autre service est possible, le même service est fermé définitivement', async () => {
       const candidat = await creerCandidat();
       const { direction, service } = await creerDirectionEtService();
+      const autreService = await Service.create({ accronyme: 'RES', description: 'Réseau' });
+      await creerStageTermine(candidat, direction, service, { moisDepuisFin: 4 });
 
-      // Chaîne terminée il y a 2 mois (6 mois de stage + 1 mois de repos largement dépassé).
-      const dateFin = new Date();
-      dateFin.setMonth(dateFin.getMonth() - 2);
-      const dateDebut = new Date(dateFin);
-      dateDebut.setMonth(dateDebut.getMonth() - 6);
+      await expect(
+        candidatService.soumettreDemandeStage(candidat.idcandidats,
+          demandeValide(direction, service, { dateDebutSouhaitee: debutAnneeProchaine }), fichiersComplets())
+      ).rejects.toThrow('il ne vous est plus ouvert');
 
-      await Stage.create({
-        candidats_idcandidats: candidat.idcandidats,
-        typeStage: 'SOUTENANCE',
-        domaineStage: 'Stage précédent',
-        dureeStage: 6,
-        dateDebutSouhaitee: dateDebut.toISOString().split('T')[0],
-        dateDebutEffective: dateDebut.toISOString().split('T')[0],
-        dateFinEffective: dateFin.toISOString().split('T')[0],
-        direction_iddirection: direction.iddirection,
-        service_idservice: service.idservice,
-        statusStage: 'TERMINE',
-      });
-
-      const result = await candidatService.soumettreDemandeStage(
-        candidat.idcandidats,
-        demandeValide(direction, service),
-        fichiersComplets()
-      );
-
+      const result = await candidatService.soumettreDemandeStage(candidat.idcandidats,
+        demandeValide(direction, autreService, { dateDebutSouhaitee: debutAnneeProchaine }), fichiersComplets());
       expect(result.statusStage).toBe('EN_ATTENTE');
     });
   });

@@ -237,7 +237,7 @@ describe('demanderRenouvellement', () => {
     // Demander 3 mois de plus ferait 5 + 3 = 8 mois > 6.
     await expect(
       candidatService.demanderRenouvellement(candidat.idcandidats, stage.idstage, { dureeDemandee: 3 }, fauxFichier)
-    ).rejects.toThrow('dépasserait la limite de 6 mois de stage continu');
+    ).rejects.toThrow('il vous reste 1 mois au plus');
   });
 
   test('refuse une seconde demande de renouvellement pour le même stage', async () => {
